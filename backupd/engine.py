@@ -122,4 +122,16 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
             notify_failure(cfg, subject="BackupD failure", body=msg, logger=logger)
         except Exception:
             pass
-        return RunResult(ok=False, message=msg)
+        # Preserve partial state if it exists
+        try:
+            return RunResult(
+                ok=False,
+                message=msg,
+                archive_path=locals().get("archive_path"),
+                uploaded=locals().get("uploaded", False),
+                retention_local_deleted=0,
+                retention_remote_deleted=0,
+                db_dump_dir=locals().get("db_dump_dir"),
+            )
+        except Exception:
+            return RunResult(ok=False, message=msg)

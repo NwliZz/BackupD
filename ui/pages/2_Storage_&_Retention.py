@@ -1,26 +1,24 @@
 import json
-import subprocess
 import streamlit as st
 
+from _helpers import inject_css, run_root, parse_json_best_effort, badge, show_logs
+
 st.set_page_config(page_title="Storage & Retention — BackupD", layout="wide")
+inject_css()
+
 st.title("Storage & Retention")
+st.markdown("🧹 **Prune locally** + ☁️ **prune remotely** based on a tiered policy (keep-all → daily → weekly → monthly).")
 
-def run_root(cmd, input_text=None):
-    p = subprocess.run(
-        ["sudo", "/usr/local/sbin/backupctl"] + cmd,
-        input=input_text,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    return p.returncode, p.stdout
+rc, out, err = run_root(["get-config"])
+cfg = parse_json_best_effort(out)
+if rc != 0 or not cfg:
+    badge("Failed to load config", "bad")
+    st.code(out + "\n" + err, language="text")
+    st.stop()
 
-rc, out = run_root(["get-config"])
-if rc != 0:
-    st.error(out); st.stop()
-cfg = json.loads(out)
+show_logs(err)
 
-st.subheader("Retention policy")
+st.subheader("Policy editor")
 
 def tier_editor(scope: str):
     pol = cfg.get("retention", {}).get(scope, {})
@@ -37,39 +35,61 @@ with c1:
 with c2:
     remote_pol = tier_editor("remote")
 
-st.divider()
-st.subheader("Dry-run & cleanup")
-
+st.markdown("---")
 b1, b2, b3 = st.columns(3)
-with b1:
-    if st.button("Refresh dry-run plan"):
-        rc2, out2 = run_root(["retention-plan"])
-        if rc2 == 0:
-            st.session_state["plan"] = json.loads(out2)
-        else:
-            st.error(out2)
-with b2:
-    if st.button("Run cleanup now"):
-        rc2, out2 = run_root(["retention-apply"])
-        if rc2 == 0:
-            st.success("Cleanup done")
-            st.session_state["plan"] = json.loads(out2)
-        else:
-            st.error(out2)
-with b3:
-    if st.button("Save retention settings"):
-        new = dict(cfg)
-        new.setdefault("retention", {})
-        new["retention"]["local"] = local_pol
-        new["retention"]["remote"] = remote_pol
-        rc2, out2 = run_root(["set-config"], input_text=json.dumps(new))
-        if rc2 == 0:
-            st.success("Saved.")
-        else:
-            st.error(out2)
+refresh = b1.button("🔎 Refresh dry-run plan", use_container_width=True)
+cleanup = b2.button("🧹 Run cleanup now", use_container_width=True)
+save = b3.button("💾 Save policy", use_container_width=True)
+
+if refresh:
+    rc2, out2, err2 = run_root(["retention-plan"])
+    plan = parse_json_best_effort(out2)
+    if rc2 == 0 and plan:
+        st.session_state["plan"] = plan
+        badge("Dry-run plan: READY", "ok")
+    else:
+        badge("Dry-run plan: FAILED", "bad")
+        st.code(out2 + "\n" + err2, language="text")
+    show_logs(err2)
+
+if cleanup:
+    rc2, out2, err2 = run_root(["retention-apply"])
+    plan = parse_json_best_effort(out2)
+    if rc2 == 0 and plan:
+        st.session_state["plan"] = plan
+        badge("Cleanup: DONE ✅", "ok")
+    else:
+        badge("Cleanup: FAILED ❌", "bad")
+        st.code(out2 + "\n" + err2, language="text")
+    show_logs(err2)
+
+if save:
+    new = dict(cfg)
+    new.setdefault("retention", {})
+    new["retention"]["local"] = local_pol
+    new["retention"]["remote"] = remote_pol
+    rc2, out2, err2 = run_root(["set-config"], input_text=json.dumps(new))
+    if rc2 == 0:
+        badge("Saved ✅", "ok")
+    else:
+        badge("Save FAILED ❌", "bad")
+        st.code(out2 + "\n" + err2, language="text")
+    show_logs(err2)
 
 plan = st.session_state.get("plan")
 if plan:
-    st.json(plan)
+    st.subheader("Plan details")
+    l = plan.get("local", {})
+    r = plan.get("remote", {})
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Local delete", len(l.get("delete", [])))
+    c2.metric("Local keep", len(l.get("keep", [])))
+    c3.metric("Remote delete", len(r.get("delete", [])))
+    c4.metric("Remote keep", len(r.get("keep", [])))
 
-st.info("Tip: OneDrive deletions typically go to the recycle bin; you may need to empty it to free quota.")
+    with st.expander("Local: delete list"):
+        st.write(l.get("delete", []))
+    with st.expander("Remote: delete list"):
+        st.write(r.get("delete", []))
+
+st.info("Note: OneDrive deletions can land in recycle bin. You may need to empty it to free quota.")

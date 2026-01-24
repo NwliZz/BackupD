@@ -68,7 +68,7 @@ def selected_databases(cfg: Dict[str, Any], disc: DBDiscovery) -> Dict[str, List
 def test_db_access(cfg: Dict[str, Any]) -> Dict[str, Any]:
     res = {"mysql": {"ok": False, "detail": ""}, "postgres": {"ok": False, "detail": ""}}
     try:
-        cp = run(["mariadb", "-e", "SELECT 1;"], check=True)
+        cp = run(["mariadb", "-Nse", "SELECT 1;"], check=True)
         res["mysql"] = {"ok": True, "detail": cp.stdout.strip()}
     except Exception as e:
         res["mysql"] = {"ok": False, "detail": str(e)}
