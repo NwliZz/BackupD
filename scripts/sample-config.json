@@ -1,0 +1,109 @@
+{
+  "mode": "custom",
+  "include_paths": [
+    "/etc",
+    "/home",
+    "/var/www"
+  ],
+  "exclude_globs": [
+    "/proc/*",
+    "/sys/*",
+    "/dev/*",
+    "/run/*",
+    "/tmp/*",
+    "/mnt/*",
+    "/media/*",
+    "/lost+found",
+    "/var/cache/*",
+    "/var/tmp/*",
+    "/swapfile"
+  ],
+  "compression": "gz",
+  "local_dir": "/var/backups/backupd",
+  "staging_dir": "/var/lib/backupd/staging",
+  "upload_enabled": true,
+  "rclone_remote": "onedrive",
+  "remote_path": "VPS-Backups",
+  "schedule_times": [
+    "03:00"
+  ],
+  "timezone": "Europe/Athens",
+  "tolerance_minutes": 2,
+  "db": {
+    "enabled": true,
+    "policy": "hybrid",
+    "dump_times": [
+      "03:05"
+    ],
+    "mysql": {
+      "enabled": true,
+      "exclude_system_dbs": [
+        "information_schema",
+        "performance_schema",
+        "sys"
+      ],
+      "include_dbs": [],
+      "exclude_dbs": [],
+      "dump_options": [
+        "--single-transaction",
+        "--routines",
+        "--events",
+        "--triggers"
+      ],
+      "compress": true
+    },
+    "postgres": {
+      "enabled": true,
+      "exclude_system_dbs": [
+        "template0",
+        "template1"
+      ],
+      "include_dbs": [],
+      "exclude_dbs": [],
+      "format": "custom",
+      "compress": false
+    }
+  },
+  "retention": {
+    "local": {
+      "keep_all_days": 7,
+      "keep_daily_until_days": 14,
+      "keep_weekly_until_days": 60,
+      "keep_monthly_until_days": 0
+    },
+    "remote": {
+      "keep_all_days": 15,
+      "keep_daily_until_days": 30,
+      "keep_weekly_until_days": 120,
+      "keep_monthly_until_days": 365
+    }
+  },
+  "notifications": {
+    "enabled": false,
+    "method": "smtp",
+    "from": "backupd@localhost",
+    "to": [],
+    "smtp": {
+      "host": "",
+      "port": 587,
+      "username": "",
+      "password": "",
+      "starttls": true
+    }
+  },
+  "ui": {
+    "port": 8050,
+    "bind": "127.0.0.1"
+  },
+  "system_db_defaults": {
+    "mysql": [
+      "information_schema",
+      "performance_schema",
+      "sys"
+    ],
+    "postgres": [
+      "template0",
+      "template1"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "backupd"
+version = "0.1.0"
+description = "BackupD — VPS backup + DB dumps + OneDrive (rclone) + retention + UI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name="BackupD"}]
+dependencies = []
+
+[project.scripts]
+backupctl = "backupd.cli:main"

@@ -1,0 +1,11 @@
+[Unit]
+Description=BackupD scheduled backup (run-if-due)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/backupctl run-if-due
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
