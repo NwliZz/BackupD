@@ -14,6 +14,8 @@ from . import retention
 from . import db as dbmod
 from .scheduler import should_run_times, mark_run, should_dump_db, mark_db_dump
 from .notify import notify_failure
+from shutil import rmtree
+
 
 @dataclass
 class RunResult:
@@ -49,9 +51,13 @@ def build_archive(cfg: Dict[str, Any], include_paths: list[str], extra_paths: li
     cmd = ["tar", "-czf", str(archive), "-C", "/"]
     for ex in excludes:
         cmd.append(f"--exclude={(ex.lstrip('/') if ex.startswith('/') else ex)}")
-    # prevent recursion
-    for p in [str(local_dir), cfg.get("staging_dir", "/var/lib/backupd/staging")]:
-        cmd.append(f"--exclude={(p.lstrip('/') if p.startswith('/') else p)}/*")
+    # prevent recursion: never include the destination of the archives
+    p = str(local_dir)
+    cmd.append(f"--exclude={(p.lstrip('/') if p.startswith('/') else p)}/*")
+
+    # exclude only transient staging workdir (keep staging/db_dumps included!)
+    staging_work = str(Path(cfg.get("staging_dir", "/var/lib/backupd/staging")) / "work")
+    cmd.append(f"--exclude={(staging_work.lstrip('/') if staging_work.startswith('/') else staging_work)}/*")
     cmd += rels
 
     logger.info("Creating archive: %s", shell_quote(cmd))
@@ -100,6 +106,14 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
                 rcl.upload_file(cfg, archive_path, logger)
                 uploaded = True
 
+
+        # cleanup db dumps after archiving (they're inside the tar now)
+        if db_dump_dir:
+            try:
+                rmtree(db_dump_dir)
+            except Exception as e:
+                logger.warning("Could not remove db dump dir %s: %s", db_dump_dir, e)
+                
         local_plan = retention.apply_prune(cfg, "local", logger)
         remote_plan = retention.apply_prune(cfg, "remote", logger) if cfg.get("upload_enabled", True) else {"delete": []}
 
