@@ -11,8 +11,8 @@ st.caption("Decide what stays Local / Cloud (OneDrive), preview changes, then ap
 
 # Reload inventory on page load + refresh button
 top = st.columns([1, 1, 6])
-refresh = top[0].button("🔄 Refresh", use_container_width=True)
-clear = top[1].button("🧽 Clear decisions", use_container_width=True)
+refresh = top[0].button("🔄 Refresh", use_container_width=True, key="bm_refresh_top")
+clear = top[1].button("🧽 Clear decisions", use_container_width=True, key="bm_clear_top")
 
 if "bm_actions" not in st.session_state or refresh:
     st.session_state["bm_actions"] = {}
@@ -229,7 +229,7 @@ st.markdown("---")
 
 # Bottom controls
 b1, b2 = st.columns([1, 1])
-if b1.button("🧽 Clear decisions", use_container_width=True):
+if b1.button("🧽 Clear decisions", use_container_width=True, key="bm_clear_bottom"):
     st.session_state["bm_actions"] = {}
     st.session_state["bm_pins"] = set(inv.get("pinned", []))
     st.rerun()
