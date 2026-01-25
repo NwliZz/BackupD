@@ -1,3 +1,5 @@
+import os
+import grp
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +17,15 @@ class DBDiscovery:
     mysql_error: Optional[str] = None
     postgres_error: Optional[str] = None
     raw: Dict[str, Any] = None
+
+def _ensure_postgres_group_dir(p: Path, mode: int) -> None:
+    ensure_dir(p, mode=mode)
+    try:
+        gid = grp.getgrnam("postgres").gr_gid
+        os.chown(p, -1, gid)      # keep owner, set group to postgres
+        os.chmod(p, mode)         # enforce mode (important if dir already existed)
+    except (KeyError, PermissionError):
+        pass
 
 def discover_databases(cfg: Dict[str, Any]) -> DBDiscovery:
     raw = {}
@@ -85,8 +96,13 @@ def dump_databases(cfg: Dict[str, Any], selected: Dict[str, List[str]], logger) 
     now = datetime.now(tz)
     stamp = now.strftime("%Y%m%d_%H%M%S")
     staging = Path(cfg.get("staging_dir", "/var/lib/backupd/staging"))
-    dump_root = staging / "db_dumps" / now.strftime("%Y%m%d")
-    ensure_dir(dump_root, mode=0o700)
+    dumps_parent = staging / "db_dumps"
+    dump_root = dumps_parent / now.strftime("%Y%m%d")
+
+    # postgres must be able to traverse staging, and write into db_dumps
+    _ensure_postgres_group_dir(staging, mode=0o750)
+    _ensure_postgres_group_dir(dumps_parent, mode=0o770)
+    _ensure_postgres_group_dir(dump_root, mode=0o770)
 
     mcfg = cfg.get("db", {}).get("mysql", {})
     if selected.get("mysql"):
