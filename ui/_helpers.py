@@ -83,7 +83,7 @@ def badge(label: str, kind: str = "ok") -> None:
 
 def run_root(cmd, input_text: Optional[str] = None, timeout: int = 1800) -> Tuple[int, str, str]:
     p = subprocess.run(
-        ["sudo", "/usr/local/sbin/backupctl"] + list(cmd),
+        ["sudo", "-n", "/usr/local/sbin/backupctl"] + list(cmd),
         input=input_text,
         text=True,
         stdout=subprocess.PIPE,
