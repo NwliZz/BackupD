@@ -12,6 +12,23 @@ from . import rclone as rcl
 from . import db as dbmod
 from . import retention
 from .status import get_status
+from . import manager
+
+
+def cmd_inventory(_args):
+    cfg = load_config()
+    print(json.dumps(manager.inventory(cfg), indent=2, ensure_ascii=False))
+
+def cmd_manage_apply(_args):
+    _require_root()
+    cfg = load_config()
+    logger = setup_logging()
+    plan = json.loads(sys.stdin.read() or "{}")
+    out = manager.apply_plan(cfg, plan, logger)
+    # if we changed pinned list, persist config
+    if out.get("pinned_saved"):
+        save_config(cfg)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
 
 def _require_root():
     if not is_root():
@@ -93,6 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run-if-due").set_defaults(fn=cmd_run_if_due)
     sub.add_parser("retention-plan").set_defaults(fn=cmd_retention_plan)
     sub.add_parser("retention-apply").set_defaults(fn=cmd_retention_apply)
+    sp = sub.add_parser("inventory", help="List local+remote backups with metadata")
+    sp.set_defaults(fn=cmd_inventory)
+
+    sp = sub.add_parser("manage-apply", help="Apply backup manager decisions (copy/migrate/delete/pin)")
+    sp.set_defaults(fn=cmd_manage_apply)
     return p
 
 def main(argv=None):

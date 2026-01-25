@@ -15,6 +15,8 @@ from . import db as dbmod
 from .scheduler import should_run_times, mark_run, should_dump_db, mark_db_dump
 from .notify import notify_failure
 from shutil import rmtree
+from . import index as bindex
+
 
 @dataclass
 class RunResult:
@@ -105,7 +107,22 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
                 rcl.upload_file(cfg, archive_path, logger)
                 uploaded = True
 
-
+        # Record metadata for UI (origin, created time, db dumps)
+        if archive_path:
+            try:
+                name = Path(archive_path).name
+                created_at = now.isoformat()
+                origin = "manual" if force else "scheduled"
+                bindex.record_backup(
+                    name=name,
+                    created_at=created_at,
+                    origin=origin,
+                    uploaded=uploaded,
+                    db_dumps=bool(db_dump_dir),
+                )
+            except Exception:
+                pass
+            
         # Cleanup staging DB dumps after successful archive creation (and optional upload).
         # The dump directory is included in the tarball via extra_paths, so keeping it on disk is unnecessary.
         if db_dump_dir and archive_path:

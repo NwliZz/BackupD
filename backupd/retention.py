@@ -88,20 +88,33 @@ def plan_prune(cfg: Dict[str, Any], scope: str) -> Dict[str, Any]:
     pol = cfg.get("retention", {}).get(scope, {})
     inv = [(n, ts) for (n, ts, _s) in (local_inventory(cfg) if scope=="local" else remote_inventory(cfg))]
     keep = select_keep(inv, now, pol)
+
+    # Pinned backups are never deleted by retention
+    pinned = set(cfg.get("retention", {}).get("pinned", []))
+    inv_names = {n for n, _ in inv}
+    pinned_eff = {n for n in pinned if n in inv_names}
+    keep |= pinned_eff
+
     delete = [n for n, _ in inv if n not in keep]
-    return {"scope": scope, "keep": sorted(list(keep)), "delete": delete, "policy": pol}
+    return {"scope": scope, "keep": sorted(list(keep)), "delete": delete, "policy": pol, "pinned": sorted(list(pinned_eff))}
 
 def apply_prune(cfg: Dict[str, Any], scope: str, logger) -> Dict[str, Any]:
     plan = plan_prune(cfg, scope)
     if scope == "local":
         d = Path(cfg.get("local_dir", "/var/backups/backupd"))
+        pinned = set(cfg.get("retention", {}).get("pinned", []))
         for name in plan["delete"]:
+            if name in pinned:
+                continue
             try:
                 (d / name).unlink()
                 logger.info("Deleted local backup: %s", name)
             except FileNotFoundError:
                 pass
     else:
+        pinned = set(cfg.get("retention", {}).get("pinned", []))
         for name in plan["delete"]:
+            if name in pinned:
+                continue
             rcl.deletefile(cfg, name, logger)
     return plan

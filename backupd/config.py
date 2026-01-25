@@ -57,6 +57,7 @@ def default_config() -> Dict[str, Any]:
         "retention": {
             "local":  {"keep_all_days": 7,  "keep_daily_until_days": 14,  "keep_weekly_until_days": 60,  "keep_monthly_until_days": 0},
             "remote": {"keep_all_days": 15, "keep_daily_until_days": 30,  "keep_weekly_until_days": 120, "keep_monthly_until_days": 365},
+            "pinned": [],
         },
 
         "notifications": {
