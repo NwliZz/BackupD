@@ -121,6 +121,14 @@ def compute_preview(local_names: set, remote_names: set, actions: dict):
         "adds_remote": adds_remote,
     }
 
+def actions_snapshot_for(all_names: list[str]) -> dict:
+    """Derive actions from widget state (act_<name>) so preview is always current."""
+    snap = {}
+    for n in all_names:
+        v = st.session_state.get(f"act_{n}", st.session_state["bm_actions"].get(n, {}).get("action", "none"))
+        if v and v != "none":
+            snap[n] = {"action": v}
+    return snap
 
 def loc_state(name: str, scope: str, local_names: set, remote_names: set, pv: dict) -> str:
     if scope == "local":
@@ -367,8 +375,10 @@ def sort_key(name: str):
 
 all_names.sort(key=sort_key, reverse=True)
 
-pv = compute_preview(local_names, remote_names, st.session_state["bm_actions"])
-summary = summarize_changes(local_names, remote_names, st.session_state["bm_actions"])
+actions_snapshot = actions_snapshot_for(all_names)
+
+pv = compute_preview(local_names, remote_names, actions_snapshot)
+summary = summarize_changes(local_names, remote_names, actions_snapshot)
 
 st.markdown("---")
 
@@ -411,7 +421,10 @@ with st.container(height=640, border=False):
             with right:
                 opts = options_for(name, local_names, remote_names)
                 label_map = {k: v for k, v in opts}
-                current = st.session_state["bm_actions"].get(name, {}).get("action", "none")
+                current = st.session_state.get(
+                    f"act_{name}",
+                    st.session_state["bm_actions"].get(name, {}).get("action", "none"),
+                )
 
                 picked = st.selectbox(
                     "Action",
@@ -420,7 +433,7 @@ with st.container(height=640, border=False):
                     index=[k for k, _ in opts].index(current) if current in [k for k, _ in opts] else 0,
                     key=f"act_{name}",
                 )
-                set_action(name, picked)
+                # IMPORTANT: do NOT call set_action() here
 
                 pin_val = (name in st.session_state["bm_pins"])
                 new_pin = st.checkbox("📌 Pinned (skip auto-delete)", value=pin_val, key=f"pin_{name}")
@@ -431,6 +444,7 @@ with st.container(height=640, border=False):
 
                 if picked != "none":
                     if st.button("↩️ Undo", key=f"undo_{name}"):
+                        st.session_state[f"act_{name}"] = "none"
                         undo_action(name)
                         st.rerun()
 
@@ -441,6 +455,11 @@ st.markdown("---")
 b1, b2 = st.columns([1, 1])
 
 if b1.button("🧽 Clear decisions", use_container_width=True, key="bm_clear_bottom"):
+    # reset all action widgets
+    for k in list(st.session_state.keys()):
+        if k.startswith("act_"):
+            st.session_state[k] = "none"
+
     st.session_state["bm_actions"] = {}
     st.session_state["bm_pins"] = set(inv.get("pinned", []))
     st.rerun()
@@ -463,8 +482,9 @@ if st.session_state["bm_confirm_open"]:
 
 # After confirm -> apply and switch to Result view
 if st.session_state["bm_confirmed"]:
+    actions_snapshot = actions_snapshot_for(all_names)
     plan = {
-        "actions": st.session_state["bm_actions"],
+        "actions": actions_snapshot,
         "pinned": sorted(list(st.session_state["bm_pins"])),
     }
     with st.spinner("Applying changes…"):
