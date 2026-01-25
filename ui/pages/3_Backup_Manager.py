@@ -31,6 +31,14 @@ if "bm_last_result" not in st.session_state:
 if "bm_last_logs" not in st.session_state:
     st.session_state["bm_last_logs"] = ""
 
+    # Staged (frozen) plan shown in confirm dialog
+if "bm_staged_actions" not in st.session_state:
+    st.session_state["bm_staged_actions"] = None
+if "bm_staged_pinned" not in st.session_state:
+    st.session_state["bm_staged_pinned"] = None
+if "bm_staged_summary" not in st.session_state:
+    st.session_state["bm_staged_summary"] = None
+
 
 if "bm_clear_pending" not in st.session_state:
     st.session_state["bm_clear_pending"] = False
@@ -484,16 +492,16 @@ st.markdown("---")
 b1, b2 = st.columns([1, 1])
 
 if b1.button("🧽 Clear decisions", use_container_width=True, key="bm_clear_bottom"):
+    # Clear any open/staged confirm dialog so it can't show stale info
+    st.session_state["bm_confirm_open"] = False
+    st.session_state["bm_confirmed"] = False
+    st.session_state["bm_staged_actions"] = None
+    st.session_state["bm_staged_pinned"] = None
+    st.session_state["bm_staged_summary"] = None
+
+    # Clear decisions (actual reset happens before widgets render)
     st.session_state["bm_clear_pending"] = True
     st.session_state["bm_reset_pins_from_server"] = True
-    st.rerun()
-    # reset all action widgets
-    for k in list(st.session_state.keys()):
-        if k.startswith("act_"):
-            st.session_state[k] = "none"
-
-    st.session_state["bm_actions"] = {}
-    st.session_state["bm_pins"] = set(inv.get("pinned", []))
     st.rerun()
 
 apply_clicked = b2.button(
@@ -504,20 +512,29 @@ apply_clicked = b2.button(
 )
 
 if apply_clicked:
+    staged_actions = actions_snapshot_for(all_names)
+    staged_summary = summarize_changes(local_names, remote_names, staged_actions)
+    staged_pinned = sorted(list(st.session_state["bm_pins"]))
+
+    st.session_state["bm_staged_actions"] = staged_actions
+    st.session_state["bm_staged_summary"] = staged_summary
+    st.session_state["bm_staged_pinned"] = staged_pinned
+
     st.session_state["bm_confirm_open"] = True
     st.session_state["bm_confirmed"] = False
     st.rerun()
 
 # Confirm lightbox (dialog)
 if st.session_state["bm_confirm_open"]:
-    render_confirm_dialog(summary, pinned_count=len(st.session_state["bm_pins"]))
+    s = st.session_state.get("bm_staged_summary") or summary
+    pinned_count = len(st.session_state.get("bm_staged_pinned") or list(st.session_state["bm_pins"]))
+    render_confirm_dialog(s, pinned_count=pinned_count)
 
 # After confirm -> apply and switch to Result view
 if st.session_state["bm_confirmed"]:
-    actions_snapshot = actions_snapshot_for(all_names)
     plan = {
-        "actions": actions_snapshot,
-        "pinned": sorted(list(st.session_state["bm_pins"])),
+        "actions": st.session_state.get("bm_staged_actions") or actions_snapshot_for(all_names),
+        "pinned": st.session_state.get("bm_staged_pinned") or sorted(list(st.session_state["bm_pins"])),
     }
     with st.spinner("Applying changes…"):
         rc2, out2, err2 = run_root(["manage-apply"], input_text=json.dumps(plan))
@@ -525,6 +542,9 @@ if st.session_state["bm_confirmed"]:
 
     st.session_state["bm_last_result"] = res
     st.session_state["bm_last_logs"] = (err2 or "").strip()
+    st.session_state["bm_staged_actions"] = None
+    st.session_state["bm_staged_pinned"] = None
+    st.session_state["bm_staged_summary"] = None
     st.session_state["bm_confirmed"] = False
     st.session_state["bm_confirm_open"] = False
     st.session_state["bm_view"] = "result"
