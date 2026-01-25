@@ -32,6 +32,11 @@ if "bm_last_logs" not in st.session_state:
     st.session_state["bm_last_logs"] = ""
 
 
+if "bm_clear_pending" not in st.session_state:
+    st.session_state["bm_clear_pending"] = False
+if "bm_reset_pins_from_server" not in st.session_state:
+    st.session_state["bm_reset_pins_from_server"] = False
+
 def _load_inventory():
     rc, out, err = run_root(["inventory"])
     inv = parse_json_best_effort(out)
@@ -130,7 +135,7 @@ def actions_snapshot_for(all_names: list[str]) -> dict:
             snap[n] = {"action": v}
     return snap
 
-def loc_state(name: str, scope: str, local_names: set, remote_names: set, pv: dict) -> str:
+def loc_state(name: str, scope: str) -> str:
     if scope == "local":
         now = name in local_names
         will_del = name in pv["deletes_local"]
@@ -141,12 +146,24 @@ def loc_state(name: str, scope: str, local_names: set, remote_names: set, pv: di
         will_add = name in pv["adds_remote"]
 
     if now and will_del:
-        return "❌ (delete)"
+        return "delete"
     if (not now) and will_add:
-        return "➕ (add)"
+        return "add"
     if now:
-        return "✅"
-    return "—"
+        return "present"
+    return "missing"
+
+
+def loc_dot(kind: str) -> str:
+    # inline “dot” (no extra CSS needed)
+    if kind == "present":
+        return "<span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;'></span>"
+    if kind == "delete":
+        return "<span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;'></span> <span style='color:#ef4444'>(delete)</span>"
+    if kind == "add":
+        return "<span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;'></span> <span style='color:#22c55e'>(add)</span>"
+    return "<span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8;'></span>"
+
 
 
 def summarize_changes(local_names: set, remote_names: set, actions: dict):
@@ -355,10 +372,22 @@ remote = inv.get("remote", [])
 local_names = {x["name"] for x in local}
 remote_names = {x["name"] for x in remote}
 
+# Clear decisions must happen BEFORE widgets are created
+if st.session_state.get("bm_clear_pending"):
+    for k in list(st.session_state.keys()):
+        if k.startswith("act_"):
+            del st.session_state[k]
+    st.session_state["bm_actions"] = {}
+    st.session_state["bm_clear_pending"] = False
+
 # Load pinned once from server
 if not st.session_state["bm_loaded_from_server"]:
     st.session_state["bm_pins"] = set(inv.get("pinned", []))
     st.session_state["bm_loaded_from_server"] = True
+
+if st.session_state.get("bm_reset_pins_from_server"):
+    st.session_state["bm_pins"] = set(inv.get("pinned", []))
+    st.session_state["bm_reset_pins_from_server"] = False
 
 # Build meta map (prefer local)
 meta = {}
@@ -415,8 +444,8 @@ with st.container(height=640, border=False):
 
             with mid:
                 st.caption("Locations")
-                st.write(f"💾 Local: {loc_state(name, 'local', local_names, remote_names, pv)}")
-                st.write(f"☁️ Cloud: {loc_state(name, 'remote', local_names, remote_names, pv)}")
+                st.markdown(f"💾 Local: {loc_dot(loc_state(name, 'local'))}", unsafe_allow_html=True)
+                st.markdown(f"☁️ Cloud: {loc_dot(loc_state(name, 'remote'))}", unsafe_allow_html=True)
 
             with right:
                 opts = options_for(name, local_names, remote_names)
@@ -455,6 +484,9 @@ st.markdown("---")
 b1, b2 = st.columns([1, 1])
 
 if b1.button("🧽 Clear decisions", use_container_width=True, key="bm_clear_bottom"):
+    st.session_state["bm_clear_pending"] = True
+    st.session_state["bm_reset_pins_from_server"] = True
+    st.rerun()
     # reset all action widgets
     for k in list(st.session_state.keys()):
         if k.startswith("act_"):
