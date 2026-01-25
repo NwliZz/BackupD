@@ -9,22 +9,23 @@ inject_css()
 st.title("Backup Manager")
 st.caption("Decide what stays Local / Cloud (OneDrive), preview changes, then apply.")
 
-# Reload inventory on page load + refresh button
+# Top controls
 top = st.columns([1, 1, 6])
 refresh = top[0].button("🔄 Refresh", use_container_width=True, key="bm_refresh_top")
 clear = top[1].button("🧽 Clear decisions", use_container_width=True, key="bm_clear_top")
 
+# Session state
 if "bm_actions" not in st.session_state or refresh:
     st.session_state["bm_actions"] = {}
 if "bm_pins" not in st.session_state or refresh:
     st.session_state["bm_pins"] = set()
+if "bm_loaded_from_server" not in st.session_state or refresh:
+    st.session_state["bm_loaded_from_server"] = False
 
-if clear:
-    st.session_state["bm_actions"] = {}
-    st.session_state["bm_pins"] = set()
-
+# Load inventory
 rc, out, err = run_root(["inventory"])
 inv = parse_json_best_effort(out)
+
 if rc != 0 or not inv:
     badge("Failed to load inventory", "bad")
     st.code(out + "\n" + err, language="text")
@@ -38,12 +39,17 @@ remote = inv.get("remote", [])
 local_names = {x["name"] for x in local}
 remote_names = {x["name"] for x in remote}
 
-# initialize pins from server only once unless user starts editing
-if not st.session_state["bm_pins"]:
-    for n in inv.get("pinned", []):
-        st.session_state["bm_pins"].add(n)
+# Load pinned list from server once (unless user clears)
+if not st.session_state["bm_loaded_from_server"]:
+    st.session_state["bm_pins"] = set(inv.get("pinned", []))
+    st.session_state["bm_loaded_from_server"] = True
 
-# Helper: pretty date
+if clear:
+    st.session_state["bm_actions"] = {}
+    st.session_state["bm_pins"] = set(inv.get("pinned", []))
+    st.rerun()
+
+# Helpers
 def pretty_when(item):
     return item.get("stamp") or item.get("mtime") or "—"
 
@@ -58,45 +64,45 @@ def origin_label(item):
 def options_for(name: str):
     in_l = name in local_names
     in_r = name in remote_names
-    opts = [("none", "No change")]
-    opts.append(("destroy", "🗑️ Destroy backup"))
+    opts = [("none", "No change"), ("destroy", "🗑️ Destroy backup")]
     if in_l and in_r:
-        opts.append(("keep_local", "⬅️ Keep only Local"))
-        opts.append(("keep_cloud", "➡️ Keep only Cloud"))
+        opts += [("keep_local", "⬅️ Keep only Local"), ("keep_cloud", "➡️ Keep only Cloud")]
     elif in_l and not in_r:
-        opts.append(("copy_to_cloud", "☁️ Save also to Cloud"))
+        opts += [("copy_to_cloud", "☁️ Save also to Cloud")]
     elif in_r and not in_l:
-        opts.append(("copy_to_local", "💾 Save also to Local"))
+        opts += [("copy_to_local", "💾 Save also to Local")]
     return opts
 
 def set_action(name: str, action: str):
     st.session_state["bm_actions"][name] = {"action": action}
 
 def undo_action(name: str):
-    if name in st.session_state["bm_actions"]:
-        del st.session_state["bm_actions"][name]
+    st.session_state["bm_actions"].pop(name, None)
 
-# Build lookup maps
+# Build meta map (prefer local info for size/mtime if both exist)
 meta = {}
+for item in remote:
+    meta[item["name"]] = item
 for item in local:
     meta[item["name"]] = item
-for item in remote:
-    meta.setdefault(item["name"], item)
 
-all_names = sorted(set(local_names) | set(remote_names), reverse=True)
+all_names = sorted(set(local_names) | set(remote_names))
 
-# Compute preview “final state”
+def sort_key(name: str):
+    item = meta.get(name, {})
+    return item.get("stamp") or item.get("mtime") or ""
+
+all_names.sort(key=sort_key, reverse=True)
+
+# Preview calculation
 def compute_preview():
     final_local = set(local_names)
     final_remote = set(remote_names)
-
-    deletes_local = set()
-    deletes_remote = set()
-    adds_local = set()
-    adds_remote = set()
+    deletes_local, deletes_remote = set(), set()
+    adds_local, adds_remote = set(), set()
 
     for name, spec in st.session_state["bm_actions"].items():
-        act = spec.get("action", "none")
+        act = (spec or {}).get("action", "none")
         in_l = name in local_names
         in_r = name in remote_names
 
@@ -107,16 +113,15 @@ def compute_preview():
                 deletes_remote.add(name)
 
         elif act == "keep_local":
-            # ensure local exists; delete remote
             if in_r:
                 deletes_remote.add(name)
-            if not in_l and in_r:
+            if (not in_l) and in_r:
                 adds_local.add(name)
 
         elif act == "keep_cloud":
             if in_l:
                 deletes_local.add(name)
-            if not in_r and in_l:
+            if (not in_r) and in_l:
                 adds_remote.add(name)
 
         elif act == "copy_to_cloud":
@@ -127,7 +132,6 @@ def compute_preview():
             if in_r and not in_l:
                 adds_local.add(name)
 
-    # Apply deletes and adds to compute final
     final_local = (final_local | adds_local) - deletes_local
     final_remote = (final_remote | adds_remote) - deletes_remote
 
@@ -151,81 +155,84 @@ c2.metric("Cloud now", len(remote_names))
 c3.metric("Local after", len(pv["final_local"]))
 c4.metric("Cloud after", len(pv["final_remote"]))
 
-def render_section(title: str, names: list[str], scope: str):
-    st.subheader(title)
+st.markdown("## All backups")
 
-    for name in names:
-        item = meta.get(name, {"name": name, "size_bytes": 0, "stamp": None, "mtime": None, "origin": "unknown"})
-        size = hbytes(item.get("size_bytes") or 0)
-        when = pretty_when(item)
-        origin = origin_label(item)
+def loc_state(name: str, scope: str) -> str:
+    """Return a compact status label for Local/Cloud."""
+    if scope == "local":
+        now = name in local_names
+        will_del = name in pv["deletes_local"]
+        will_add = name in pv["adds_local"]
+    else:
+        now = name in remote_names
+        will_del = name in pv["deletes_remote"]
+        will_add = name in pv["adds_remote"]
 
-        in_l_now = name in local_names
-        in_r_now = name in remote_names
+    # Visual states
+    if now and will_del:
+        return "❌ (delete)"
+    if (not now) and will_add:
+        return "➕ (add)"
+    if now:
+        return "✅"
+    return "—"
 
-        will_del = (scope == "local" and name in pv["deletes_local"]) or (scope == "remote" and name in pv["deletes_remote"])
-        will_add = (scope == "local" and name in pv["adds_local"]) or (scope == "remote" and name in pv["adds_remote"])
+for name in all_names:
+    item = meta.get(name, {"name": name, "size_bytes": 0, "stamp": None, "mtime": None, "origin": "unknown"})
+    size = hbytes(item.get("size_bytes") or 0)
+    when = pretty_when(item)
+    origin = origin_label(item)
 
-        # Row card
-        row = st.container()
-        with row:
-            left, mid, right = st.columns([6, 2, 4])
+    # overall delete indicator
+    deleting_everywhere = (name in pv["deletes_local"] or name in pv["deletes_remote"]) and (
+        (name not in pv["final_local"]) and (name not in pv["final_remote"])
+    )
 
-            # left: title + meta (strike if delete)
-            meta_line = f"{when} • {size} • {origin}"
-            if will_del:
-                badge("Will be deleted", "bad")
-                st.markdown(f"**{name}**  \n~~{meta_line}~~")
-            elif will_add:
-                badge("Will be added here", "ok")
-                st.markdown(f"**{name}**  \n{meta_line}")
+    row = st.container()
+    with row:
+        left, mid, right = st.columns([7, 2, 4], vertical_alignment="top")
+
+        with left:
+            if deleting_everywhere:
+                badge("Will be destroyed", "bad")
+                st.markdown(f"**{name}**")
+                st.caption(f"~~{when} • {size} • {origin}~~")
             else:
-                st.markdown(f"**{name}**  \n{meta_line}")
+                st.markdown(f"**{name}**")
+                st.caption(f"{when} • {size} • {origin}")
 
-            # mid: location info
-            with mid:
-                st.caption("Locations")
-                st.write(("💾" if in_l_now else "—") + "  Local")
-                st.write(("☁️" if in_r_now else "—") + "  Cloud")
+        with mid:
+            st.caption("Locations")
+            st.write(f"💾 Local: {loc_state(name, 'local')}")
+            st.write(f"☁️ Cloud: {loc_state(name, 'remote')}")
 
-            # right: actions + pin + undo
-            with right:
-                opts = options_for(name)
-                label_map = {k: v for k, v in opts}
-                current = st.session_state["bm_actions"].get(name, {}).get("action", "none")
+        with right:
+            opts = options_for(name)
+            label_map = {k: v for k, v in opts}
+            current = st.session_state["bm_actions"].get(name, {}).get("action", "none")
 
-                picked = st.selectbox(
-                    "Action",
-                    options=[k for k, _ in opts],
-                    format_func=lambda k: label_map.get(k, k),
-                    index=[k for k, _ in opts].index(current) if current in [k for k, _ in opts] else 0,
-                    key=f"act_{scope}_{name}",
-                )
-                set_action(name, picked)
+            picked = st.selectbox(
+                "Action",
+                options=[k for k, _ in opts],
+                format_func=lambda k: label_map.get(k, k),
+                index=[k for k, _ in opts].index(current) if current in [k for k, _ in opts] else 0,
+                key=f"act_{name}",
+            )
+            set_action(name, picked)
 
-                pin_val = (name in st.session_state["bm_pins"])
-                new_pin = st.checkbox("📌 Pinned (skip auto-delete)", value=pin_val, key=f"pin_{scope}_{name}")
-                if new_pin:
-                    st.session_state["bm_pins"].add(name)
-                else:
-                    st.session_state["bm_pins"].discard(name)
+            pin_val = (name in st.session_state["bm_pins"])
+            new_pin = st.checkbox("📌 Pinned (skip auto-delete)", value=pin_val, key=f"pin_{name}")
+            if new_pin:
+                st.session_state["bm_pins"].add(name)
+            else:
+                st.session_state["bm_pins"].discard(name)
 
-                if picked != "none":
-                    if st.button("↩️ Undo", key=f"undo_{scope}_{name}"):
-                        undo_action(name)
-                        st.rerun()
+            if picked != "none":
+                if st.button("↩️ Undo", key=f"undo_{name}"):
+                    undo_action(name)
+                    st.rerun()
 
-st.markdown("## Local backups")
-local_preview_list = sorted(pv["final_local"], reverse=True)
-render_section("Local Backups", local_preview_list, "local")
-
-st.markdown("---")
-
-st.markdown("## Cloud backups")
-remote_preview_list = sorted(pv["final_remote"], reverse=True)
-render_section("Cloud Backups", remote_preview_list, "remote")
-
-st.markdown("---")
+    st.divider()
 
 # Bottom controls
 b1, b2 = st.columns([1, 1])
@@ -234,7 +241,7 @@ if b1.button("🧽 Clear decisions", use_container_width=True, key="bm_clear_bot
     st.session_state["bm_pins"] = set(inv.get("pinned", []))
     st.rerun()
 
-apply = b2.button("✅ Apply decisions", use_container_width=True)
+apply = b2.button("✅ Apply decisions", use_container_width=True, key="bm_apply")
 
 if apply:
     plan = {
