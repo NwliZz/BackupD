@@ -16,7 +16,6 @@ from .scheduler import should_run_times, mark_run, should_dump_db, mark_db_dump
 from .notify import notify_failure
 from shutil import rmtree
 
-
 @dataclass
 class RunResult:
     ok: bool
@@ -107,10 +106,12 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
                 uploaded = True
 
 
-        # cleanup db dumps after archiving (they're inside the tar now)
-        if db_dump_dir:
+        # Cleanup staging DB dumps after successful archive creation (and optional upload).
+        # The dump directory is included in the tarball via extra_paths, so keeping it on disk is unnecessary.
+        if db_dump_dir and archive_path:
             try:
                 rmtree(db_dump_dir)
+                logger.info("Cleaned staging db dumps: %s", db_dump_dir)
             except Exception as e:
                 logger.warning("Could not remove db dump dir %s: %s", db_dump_dir, e)
                 
