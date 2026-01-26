@@ -384,7 +384,7 @@ remote_names = {x["name"] for x in remote}
 if st.session_state.get("bm_clear_pending"):
     for k in list(st.session_state.keys()):
         if k.startswith("act_"):
-            del st.session_state[k]
+            st.session_state[k] = "none"
     st.session_state["bm_actions"] = {}
     st.session_state["bm_clear_pending"] = False
 
