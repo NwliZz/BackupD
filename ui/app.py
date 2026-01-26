@@ -210,5 +210,3 @@ st.caption(
 st.caption(
     f"Other used: **{hbytes(other_used)}** • Local backups: **{hbytes(local_used)}** • Free: **{hbytes(free)}**"
 )
-
-st.info("Use the sidebar to open **Backup** and **Storage & Retention**.")
