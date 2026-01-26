@@ -7,9 +7,6 @@ from _helpers import inject_css, run_root, parse_json_best_effort, badge, hbytes
 st.set_page_config(page_title="BackupD", layout="wide")
 inject_css()
 
-# Auto-refresh the page every 60 seconds to keep the clock and timer updated
-st.html("<meta http-equiv='refresh' content='60'>")
-
 st.title("BackupD")
 badge("LOCALHOST UI • Access via SSH tunnel", "warn")
 
@@ -82,8 +79,73 @@ else:
     schedule_times = cfg.get("schedule_times", [])
     delta_to_next = get_next_run(now, schedule_times)
 
-    c1.metric("Server Time", now.strftime("%H:%M:%S"))
-    c2.metric("Next Backup In", format_timedelta(delta_to_next))
+    with c1:
+        # Custom HTML for the live clock metric, to be updated by JavaScript
+        st.markdown(f"""
+            <div data-testid="stMetric">
+                <label style="color: var(--muted); font-size: .9rem;">Server Time</label>
+                <div id="live-clock" style="font-size: 1.75rem; font-weight: 600;">{now.strftime("%H:%M:%S")}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        # Custom HTML for the countdown timer metric
+        st.markdown(f"""
+            <div data-testid="stMetric">
+                <label style="color: var(--muted); font-size: .9rem;">Next Backup In</label>
+                <div id="live-countdown" style="font-size: 1.75rem; font-weight: 600;">{format_timedelta(delta_to_next)}</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    # JavaScript to update the clocks every second without reloading the page
+    js_code = f"""
+<script>
+(function() {{
+    // Ensure this script doesn't run multiple times on Streamlit re-renders
+    if (window.backupdClockActive) {{
+        return;
+    }}
+    window.backupdClockActive = true;
+
+    const clockElement = document.getElementById('live-clock');
+    const countdownElement = document.getElementById('live-countdown');
+
+    if (!clockElement || !countdownElement) {{
+        return; // Elements not found, stop the script
+    }}
+
+    // --- Server Time Clock ---
+    // Initialize with the precise ISO timestamp from the server for accuracy
+    let serverTime = new Date('{now.isoformat()}');
+
+    // --- Countdown Timer ---
+    let remainingSeconds = {int(delta_to_next.total_seconds())};
+
+    const formatTime = (date) => String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0') + ':' + String(date.getSeconds()).padStart(2, '0');
+
+    const formatCountdown = (seconds) => {{
+        if (seconds < 0) seconds = 0;
+        const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        return `${{h}}:${{m}}:${{s}}`;
+    }};
+
+    const timerInterval = setInterval(() => {{
+        if (!document.body.contains(clockElement) || !document.body.contains(countdownElement)) {{
+            clearInterval(timerInterval);
+            window.backupdClockActive = false;
+            return;
+        }}
+        serverTime.setSeconds(serverTime.getSeconds() + 1);
+        clockElement.innerText = formatTime(serverTime);
+        if (remainingSeconds > 0) remainingSeconds--;
+        countdownElement.innerText = formatCountdown(remainingSeconds);
+    }}, 1000);
+}})();
+</script>
+"""
+    st.components.v1.html(js_code, height=0)
 
 disk = data.get("disk", {})
 total = int(disk.get("total_bytes", 0) or 0)
