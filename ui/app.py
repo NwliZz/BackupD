@@ -80,72 +80,65 @@ else:
     delta_to_next = get_next_run(now, schedule_times)
 
     with c1:
-        # Custom HTML for the live clock metric, to be updated by JavaScript
-        st.markdown(f"""
-            <div data-testid="stMetric">
-                <label style="color: var(--muted); font-size: .9rem;">Server Time</label>
-                <div id="live-clock" style="font-size: 1.75rem; font-weight: 600;">{now.strftime("%H:%M:%S")}</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    with c2:
-        # Custom HTML for the countdown timer metric
-        st.markdown(f"""
-            <div data-testid="stMetric">
-                <label style="color: var(--muted); font-size: .9rem;">Next Backup In</label>
-                <div id="live-countdown" style="font-size: 1.75rem; font-weight: 600;">{format_timedelta(delta_to_next)}</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    # JavaScript to update the clocks every second without reloading the page
-    js_code = f"""
+        clock_html = f"""
+<div class="metric">
+  <div class="label">Server Time</div>
+  <div id="live-clock" class="value">{now.strftime("%H:%M:%S")}</div>
+</div>
+<style>
+  .metric {{ font-family: var(--font); }}
+  .metric .label {{ color: var(--muted); font-size: .9rem; }}
+  .metric .value {{ font-size: 1.75rem; font-weight: 600; }}
+</style>
 <script>
 (function() {{
-    // Ensure this script doesn't run multiple times on Streamlit re-renders
-    if (window.backupdClockActive) {{
-        return;
-    }}
-    window.backupdClockActive = true;
-
-    const clockElement = document.getElementById('live-clock');
-    const countdownElement = document.getElementById('live-countdown');
-
-    if (!clockElement || !countdownElement) {{
-        return; // Elements not found, stop the script
-    }}
-
-    // --- Server Time Clock ---
-    // Initialize with the precise ISO timestamp from the server for accuracy
-    let serverTime = new Date('{now.isoformat()}');
-
-    // --- Countdown Timer ---
-    let remainingSeconds = {int(delta_to_next.total_seconds())};
-
-    const formatTime = (date) => String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0') + ':' + String(date.getSeconds()).padStart(2, '0');
-
-    const formatCountdown = (seconds) => {{
-        if (seconds < 0) seconds = 0;
-        const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
-        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
-        const s = String(seconds % 60).padStart(2, '0');
-        return `${{h}}:${{m}}:${{s}}`;
-    }};
-
-    const timerInterval = setInterval(() => {{
-        if (!document.body.contains(clockElement) || !document.body.contains(countdownElement)) {{
-            clearInterval(timerInterval);
-            window.backupdClockActive = false;
-            return;
-        }}
-        serverTime.setSeconds(serverTime.getSeconds() + 1);
-        clockElement.innerText = formatTime(serverTime);
-        if (remainingSeconds > 0) remainingSeconds--;
-        countdownElement.innerText = formatCountdown(remainingSeconds);
-    }}, 1000);
+  const clockElement = document.getElementById('live-clock');
+  if (!clockElement) return;
+  let serverTime = new Date('{now.isoformat()}');
+  const formatTime = (date) =>
+    String(date.getHours()).padStart(2, '0') + ':' +
+    String(date.getMinutes()).padStart(2, '0') + ':' +
+    String(date.getSeconds()).padStart(2, '0');
+  setInterval(() => {{
+    serverTime.setSeconds(serverTime.getSeconds() + 1);
+    clockElement.innerText = formatTime(serverTime);
+  }}, 1000);
 }})();
 </script>
 """
-    st.components.v1.html(js_code, height=0)
+        st.components.v1.html(clock_html, height=95)
+
+    with c2:
+        countdown_html = f"""
+<div class="metric">
+  <div class="label">Next Backup In</div>
+  <div id="live-countdown" class="value">{format_timedelta(delta_to_next)}</div>
+</div>
+<style>
+  .metric {{ font-family: var(--font); }}
+  .metric .label {{ color: var(--muted); font-size: .9rem; }}
+  .metric .value {{ font-size: 1.75rem; font-weight: 600; }}
+</style>
+<script>
+(function() {{
+  const countdownElement = document.getElementById('live-countdown');
+  if (!countdownElement) return;
+  let remainingSeconds = {int(delta_to_next.total_seconds())};
+  const formatCountdown = (seconds) => {{
+    if (seconds < 0) seconds = 0;
+    const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+    const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+    const s = String(seconds % 60).padStart(2, '0');
+    return `${{h}}:${{m}}:${{s}}`;
+  }};
+  setInterval(() => {{
+    if (remainingSeconds > 0) remainingSeconds--;
+    countdownElement.innerText = formatCountdown(remainingSeconds);
+  }}, 1000);
+}})();
+</script>
+"""
+        st.components.v1.html(countdown_html, height=95)
 
 disk = data.get("disk", {})
 total = int(disk.get("total_bytes", 0) or 0)
