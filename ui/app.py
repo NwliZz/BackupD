@@ -163,13 +163,52 @@ disk = data.get("disk", {})
 total = int(disk.get("total_bytes", 0) or 0)
 used = int(disk.get("used_bytes", 0) or 0)
 free = int(disk.get("free_bytes", 0) or 0)
-pct = (used / total) if total else 0.0
+local_used = int(data.get("local_bytes", 0) or 0)
+other_used = max(used - local_used, 0)
+
+def clamp_unit(value: float) -> float:
+    return min(max(value, 0.0), 1.0)
+
+pct = clamp_unit((used / total) if total else 0.0)
+other_pct = clamp_unit((other_used / total) if total else 0.0)
+backup_pct = clamp_unit((local_used / total) if total else 0.0)
 
 st.markdown("---")
 st.subheader("Storage")
-st.progress(min(max(pct, 0.0), 1.0))
+theme_primary = st.get_option("theme.primaryColor") or "#1f77b4"
+bar_html = f"""
+<style>
+  .storage-bar {{
+    width: 100%;
+    height: 18px;
+    background: rgba(154, 160, 166, 0.25);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+  }}
+  .storage-bar__segment {{
+    height: 100%;
+  }}
+  .storage-bar__segment--other {{
+    width: {other_pct * 100:.2f}%;
+    background: #9aa0a6;
+  }}
+  .storage-bar__segment--backup {{
+    width: {backup_pct * 100:.2f}%;
+    background: {theme_primary};
+  }}
+</style>
+<div class="storage-bar" role="img" aria-label="Storage usage">
+  <div class="storage-bar__segment storage-bar__segment--other"></div>
+  <div class="storage-bar__segment storage-bar__segment--backup"></div>
+</div>
+"""
+st.markdown(bar_html, unsafe_allow_html=True)
 st.caption(
     f"Used: **{hbytes(used)}** • Free: **{hbytes(free)}** • Total: **{hbytes(total)}** • ({pct*100:.1f}%)"
+)
+st.caption(
+    f"Other used: **{hbytes(other_used)}** • Local backups: **{hbytes(local_used)}** • Free: **{hbytes(free)}**"
 )
 
 st.info("Use the sidebar to open **Backup** and **Storage & Retention**.")

@@ -79,6 +79,7 @@ def get_status() -> Dict[str, Any]:
         next_db_in = int((next_db - now_dt).total_seconds()) if next_db else None
 
     local = local_inventory(cfg)
+    local_bytes = sum(size for _name, _ts, size in local)
     remote = []
     if cfg.get("upload_enabled", True):
         try:
@@ -92,6 +93,7 @@ def get_status() -> Dict[str, Any]:
         "local_dir": cfg.get("local_dir"),
         "local_count": len(local),
         "local_latest": local[0][0] if local else None,
+        "local_bytes": local_bytes,
         "remote_count": len(remote),
         "remote_latest": remote[0][0] if remote else None,
         "disk": disk_usage(cfg.get("local_dir", "/var/backups/backupd")),
