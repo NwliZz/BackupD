@@ -1,23 +1,17 @@
 import streamlit as st
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from _helpers import inject_css, run_root, parse_json_best_effort, badge, hbytes, show_logs
 
 st.set_page_config(page_title="BackupD", layout="wide")
 inject_css()
 
+# Auto-refresh the page every 60 seconds to keep the clock and timer updated
+st.html("<meta http-equiv='refresh' content='60'>")
+
 st.title("BackupD")
 badge("LOCALHOST UI • Access via SSH tunnel", "warn")
-
-st.markdown(
-    """
-**Tunnel command (from your PC):**
-```bash
-ssh -L 8050:127.0.0.1:8050 speg-vps
-```
-Open: http://localhost:8050
-""",
-    help="UI listens on 127.0.0.1 only. Keep it that way.",
-)
 
 rc, out, err = run_root(["status"])
 data = parse_json_best_effort(out)
@@ -39,6 +33,57 @@ with c3:
     st.metric("Remote backups", data.get("remote_count", 0))
 with c4:
     st.metric("Latest local", data.get("local_latest") or "—")
+
+st.markdown("---")
+
+# --- Live Clock & Timer ---
+
+def get_next_run(now: datetime, schedule_times: list[str]) -> timedelta:
+    """Calculates the time difference to the next scheduled run."""
+    run_times_today = []
+    for t_str in schedule_times:
+        try:
+            hour, minute = map(int, t_str.split(':'))
+            run_times_today.append(now.replace(hour=hour, minute=minute, second=0, microsecond=0))
+        except (ValueError, IndexError):
+            continue
+
+    run_times_today.sort()
+
+    next_run_time = None
+    for run_time in run_times_today:
+        if run_time > now:
+            next_run_time = run_time
+            break
+
+    if next_run_time is None and run_times_today:
+        next_run_time = run_times_today[0] + timedelta(days=1)
+
+    return (next_run_time - now) if next_run_time else timedelta(0)
+
+def format_timedelta(td: timedelta) -> str:
+    """Formats a timedelta into HH:MM:SS."""
+    total_seconds = int(td.total_seconds())
+    if total_seconds < 0:
+        total_seconds = 0
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+rc_cfg, out_cfg, err_cfg = run_root(["get-config"])
+cfg = parse_json_best_effort(out_cfg)
+
+c1, c2, c3, c4 = st.columns(4)
+if not cfg:
+    c1.warning("Could not load config for clock/timer.")
+else:
+    tz = ZoneInfo(cfg.get("timezone", "UTC"))
+    now = datetime.now(tz)
+    schedule_times = cfg.get("schedule_times", [])
+    delta_to_next = get_next_run(now, schedule_times)
+
+    c1.metric("Server Time", now.strftime("%H:%M:%S"))
+    c2.metric("Next Backup In", format_timedelta(delta_to_next))
 
 disk = data.get("disk", {})
 total = int(disk.get("total_bytes", 0) or 0)
