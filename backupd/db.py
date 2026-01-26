@@ -1,3 +1,5 @@
+"""Database discovery, selection, and dump orchestration."""
+
 from __future__ import annotations
 import os
 import grp
@@ -12,6 +14,7 @@ from .utils import run, ensure_dir, shell_quote
 
 @dataclass
 class DBDiscovery:
+    """Container for DB discovery results and any errors."""
     mysql_dbs: List[str]
     postgres_dbs: List[str]
     mysql_error: Optional[str] = None
@@ -19,6 +22,7 @@ class DBDiscovery:
     raw: Dict[str, Any] = None
 
 def _ensure_postgres_group_dir(p: Path, mode: int) -> None:
+    """Ensure directory exists and is accessible by postgres group."""
     ensure_dir(p, mode=mode)
     try:
         gid = grp.getgrnam("postgres").gr_gid
@@ -28,6 +32,7 @@ def _ensure_postgres_group_dir(p: Path, mode: int) -> None:
         pass
 
 def discover_databases(cfg: Dict[str, Any]) -> DBDiscovery:
+    """Detect MySQL/Postgres databases available for backup."""
     raw = {}
     mysql_dbs, pg_dbs = [], []
     mysql_err, pg_err = None, None
@@ -57,12 +62,14 @@ def discover_databases(cfg: Dict[str, Any]) -> DBDiscovery:
     return DBDiscovery(mysql_dbs=mysql_dbs, postgres_dbs=pg_dbs, mysql_error=mysql_err, postgres_error=pg_err, raw=raw)
 
 def _filter_dbs(all_dbs: List[str], include: List[str], exclude: List[str], system_exclude: List[str]) -> List[str]:
+    """Apply include/exclude rules for database selection."""
     exclude_set = set(exclude or []) | set(system_exclude or [])
     if include:
         return [d for d in include if d in all_dbs and d not in set(exclude or [])]
     return [d for d in all_dbs if d not in exclude_set]
 
 def selected_databases(cfg: Dict[str, Any], disc: DBDiscovery) -> Dict[str, List[str]]:
+    """Compute final DB lists based on config and discovery results."""
     db_cfg = cfg.get("db", {})
     out = {"mysql": [], "postgres": []}
 
@@ -77,6 +84,7 @@ def selected_databases(cfg: Dict[str, Any], disc: DBDiscovery) -> Dict[str, List
     return out
 
 def test_db_access(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Run a lightweight query against DBs to verify access."""
     res = {"mysql": {"ok": False, "detail": ""}, "postgres": {"ok": False, "detail": ""}}
     try:
         cp = run(["mariadb", "-Nse", "SELECT 1;"], check=True)
@@ -92,6 +100,7 @@ def test_db_access(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 def dump_databases(cfg: Dict[str, Any], selected: Dict[str, List[str]], logger) -> Path:
+    """Dump selected databases into a dated staging folder."""
     tz = ZoneInfo(cfg.get("timezone", "UTC"))
     now = datetime.now(tz)
     stamp = now.strftime("%Y%m%d_%H%M%S")

@@ -1,3 +1,5 @@
+"""Logging configuration for the backup daemon and CLI."""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +11,7 @@ DEFAULT_LOG_DIR = "/var/log/backupd"
 DEFAULT_LOG_FILE = "backupd.log"
 
 def setup_logging(log_dir: str = DEFAULT_LOG_DIR, level: int = logging.INFO) -> logging.Logger:
+    """Create a rotating file logger and console logger if not already set."""
     logger = logging.getLogger("backupd")
     logger.setLevel(level)
     logger.propagate = False

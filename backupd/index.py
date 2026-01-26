@@ -1,3 +1,5 @@
+"""Local metadata index for backups (origin, timestamps, flags)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,6 +12,7 @@ INDEX_PATH = "/var/lib/backupd/index.json"
 
 
 def _load() -> Dict[str, Any]:
+    """Load the JSON index, creating the base shape if missing."""
     data = read_json(INDEX_PATH, default=None)
     if not data:
         return {"backups": {}}
@@ -19,6 +22,7 @@ def _load() -> Dict[str, Any]:
 
 
 def _save(data: Dict[str, Any]) -> None:
+    """Persist index data atomically."""
     ensure_dir("/var/lib/backupd", mode=0o755)
     write_json_atomic(INDEX_PATH, data, mode=0o600)
 
@@ -30,6 +34,7 @@ def record_backup(
     uploaded: bool,
     db_dumps: bool,
 ) -> None:
+    """Upsert metadata for a backup name."""
     data = _load()
     data["backups"][name] = {
         "created_at": created_at,
@@ -42,5 +47,6 @@ def record_backup(
 
 
 def get_meta(name: str) -> Dict[str, Any]:
+    """Return stored metadata for a backup name (or empty dict)."""
     data = _load()
     return data.get("backups", {}).get(name, {})

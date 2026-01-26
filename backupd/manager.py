@@ -1,3 +1,5 @@
+"""Inventory and apply operations for the Backup Manager UI."""
+
 from __future__ import annotations
 
 import os
@@ -18,10 +20,12 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.tar\.gz$")
 
 
 def _tz(cfg: Dict[str, Any]) -> ZoneInfo:
+    """Resolve the timezone from config."""
     return ZoneInfo(cfg.get("timezone", "UTC"))
 
 
 def _remote_dir(cfg: Dict[str, Any]) -> str:
+    """Return the rclone remote base directory for this host."""
     remote = cfg.get("rclone_remote", "onedrive")
     base = cfg.get("remote_path", "VPS-Backups").strip().strip("/")
     host = hostname_short()
@@ -29,19 +33,23 @@ def _remote_dir(cfg: Dict[str, Any]) -> str:
 
 
 def _remote_file(cfg: Dict[str, Any], name: str) -> str:
+    """Return the full remote path for a backup object."""
     return f"{_remote_dir(cfg)}/{name}"
 
 
 def _local_dir(cfg: Dict[str, Any]) -> Path:
+    """Return the local backup directory."""
     return Path(cfg.get("local_dir", "/var/backups/backupd"))
 
 
 def _safe_name(name: str) -> None:
+    """Guard against path traversal and unexpected names."""
     if "/" in name or "\\" in name or not SAFE_NAME_RE.match(name):
         raise ValueError(f"Unsafe backup name: {name}")
 
 
 def _parse_stamp_from_name(name: str, tz: ZoneInfo) -> Optional[str]:
+    """Extract timestamp from filename into an ISO string."""
     m = re.search(r"_(\d{8})_(\d{6})\.tar\.gz$", name)
     if not m:
         return None
@@ -50,6 +58,7 @@ def _parse_stamp_from_name(name: str, tz: ZoneInfo) -> Optional[str]:
 
 
 def _rclone_lsjson(path: str) -> List[Dict[str, Any]]:
+    """Run rclone lsjson and return parsed rows or raise on failure."""
     cp = subprocess.run(
         ["rclone", "lsjson", path],
         capture_output=True,
@@ -65,6 +74,7 @@ def _rclone_lsjson(path: str) -> List[Dict[str, Any]]:
 
 
 def inventory(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Return local+remote inventories enriched with metadata for the UI."""
     tz = _tz(cfg)
     pinned = set(cfg.get("retention", {}).get("pinned", []))
 
@@ -170,6 +180,7 @@ def apply_plan(cfg: Dict[str, Any], plan: Dict[str, Any], logger) -> Dict[str, A
     rd = _remote_dir(cfg)
 
     def copy_to_cloud(name: str) -> None:
+        """Copy a local backup to the configured remote."""
         _safe_name(name)
         src = str(ld / name)
         dst = _remote_file(cfg, name)
@@ -177,6 +188,7 @@ def apply_plan(cfg: Dict[str, Any], plan: Dict[str, Any], logger) -> Dict[str, A
         subprocess.run(["rclone", "copyto", src, dst], check=True)
 
     def copy_to_local(name: str) -> None:
+        """Copy a remote backup down to local storage."""
         _safe_name(name)
         src = _remote_file(cfg, name)
         dst = str(ld / name)
@@ -186,6 +198,7 @@ def apply_plan(cfg: Dict[str, Any], plan: Dict[str, Any], logger) -> Dict[str, A
         subprocess.run(["rclone", "copyto", src, dst], check=True)
 
     def delete_local(name: str) -> None:
+        """Delete a local backup file if present."""
         _safe_name(name)
         p = ld / name
         if p.exists():
@@ -193,6 +206,7 @@ def apply_plan(cfg: Dict[str, Any], plan: Dict[str, Any], logger) -> Dict[str, A
             p.unlink()
 
     def delete_cloud(name: str) -> None:
+        """Delete a remote backup file."""
         _safe_name(name)
         rf = _remote_file(cfg, name)
         logger.info("Delete cloud: %s", rf)

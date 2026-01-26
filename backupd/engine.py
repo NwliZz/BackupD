@@ -1,3 +1,5 @@
+"""Backup execution pipeline: schedule checks, archive creation, upload, retention."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +22,7 @@ from . import index as bindex
 
 @dataclass
 class RunResult:
+    """Structured result for a backup run."""
     ok: bool
     message: str
     archive_path: Optional[str] = None
@@ -29,9 +32,11 @@ class RunResult:
     db_dump_dir: Optional[str] = None
 
 def _effective_include_paths(cfg: Dict[str, Any]) -> list[str]:
+    """Resolve include paths based on mode (custom vs hestia)."""
     return ["/backup"] if cfg.get("mode") == "hestia" else cfg.get("include_paths", ["/etc","/home","/var/www"])
 
 def build_archive(cfg: Dict[str, Any], include_paths: list[str], extra_paths: list[str], logger) -> str:
+    """Create a compressed tarball for the selected paths."""
     tz = ZoneInfo(cfg.get("timezone", "UTC"))
     now = datetime.now(tz)
     host = hostname_short()
@@ -66,6 +71,7 @@ def build_archive(cfg: Dict[str, Any], include_paths: list[str], extra_paths: li
     return str(archive)
 
 def run_backup(now_override: Optional[datetime] = None, force: bool = False, only_cleanup: bool = False) -> RunResult:
+    """Main backup workflow with optional schedule enforcement."""
     cfg = load_config()
     validate_config(cfg)
     logger = setup_logging()
@@ -74,6 +80,7 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
 
     try:
         key = None
+        # Decide whether a scheduled run is due.
         if not force and not only_cleanup:
             due, key = should_run_times(now, cfg.get("schedule_times", []), int(cfg.get("tolerance_minutes", 2)), "backup")
             if not due:
@@ -82,6 +89,7 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
         db_dump_dir = None
         extra_paths: list[str] = []
 
+        # Optional DB dump workflow (may add paths into the archive).
         if not only_cleanup and cfg.get("db", {}).get("enabled"):
             pol = cfg.get("db", {}).get("policy", "hybrid")
             if pol == "every_backup":
@@ -101,6 +109,7 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
         archive_path = None
         uploaded = False
 
+        # Build the tarball and optionally upload to remote storage.
         if not only_cleanup:
             archive_path = build_archive(cfg, _effective_include_paths(cfg), extra_paths, logger)
             if cfg.get("upload_enabled", True):
@@ -132,6 +141,7 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
             except Exception as e:
                 logger.warning("Could not remove db dump dir %s: %s", db_dump_dir, e)
                 
+        # Apply retention cleanup after a successful run.
         local_plan = retention.apply_prune(cfg, "local", logger)
         remote_plan = retention.apply_prune(cfg, "remote", logger) if cfg.get("upload_enabled", True) else {"delete": []}
 
@@ -148,6 +158,7 @@ def run_backup(now_override: Optional[datetime] = None, force: bool = False, onl
             db_dump_dir=db_dump_dir,
         )
     except Exception as e:
+        # On any failure, attempt to notify and return a partial summary.
         msg = f"BackupD failed: {e}"
         logger.error(msg)
         try:

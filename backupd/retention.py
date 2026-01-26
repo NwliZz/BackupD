@@ -1,3 +1,5 @@
+"""Retention policy planning and application for backups."""
+
 from __future__ import annotations
 
 import os
@@ -12,6 +14,7 @@ from . import rclone as rcl
 NAME_RE = re.compile(r"_(\d{8})_(\d{6})\.tar\.gz$")
 
 def _parse_ts_from_name(name: str, tz: ZoneInfo) -> datetime | None:
+    """Parse a timestamp from a backup filename."""
     m = NAME_RE.search(name)
     if not m:
         return None
@@ -19,9 +22,11 @@ def _parse_ts_from_name(name: str, tz: ZoneInfo) -> datetime | None:
     return datetime(int(d[0:4]), int(d[4:6]), int(d[6:8]), int(t[0:2]), int(t[2:4]), int(t[4:6]), tzinfo=tz)
 
 def _age_days(now: datetime, ts: datetime) -> float:
+    """Compute age in days for a timestamp."""
     return (now - ts).total_seconds() / 86400.0
 
 def select_keep(files: List[Tuple[str, datetime]], now: datetime, policy: Dict[str, Any]) -> Set[str]:
+    """Return the set of filenames to keep under a retention policy."""
     ka = int(policy.get("keep_all_days", 0))
     kd = int(policy.get("keep_daily_until_days", 0))
     kw = int(policy.get("keep_weekly_until_days", 0))
@@ -34,6 +39,7 @@ def select_keep(files: List[Tuple[str, datetime]], now: datetime, policy: Dict[s
             keep.add(name)
 
     def keep_latest(min_days_excl: int, max_days_incl: int, key_fn):
+        """Keep the latest backup per bucket (day/week/month) in a window."""
         group = {}
         for name, ts in files:
             age = _age_days(now, ts)
@@ -54,6 +60,7 @@ def select_keep(files: List[Tuple[str, datetime]], now: datetime, policy: Dict[s
     return keep
 
 def local_inventory(cfg: Dict[str, Any]) -> List[Tuple[str, datetime, int]]:
+    """List local backups with timestamps and sizes."""
     tz = ZoneInfo(cfg.get("timezone", "UTC"))
     d = Path(cfg.get("local_dir", "/var/backups/backupd"))
     if not d.exists():
@@ -69,6 +76,7 @@ def local_inventory(cfg: Dict[str, Any]) -> List[Tuple[str, datetime, int]]:
     return items
 
 def remote_inventory(cfg: Dict[str, Any]) -> List[Tuple[str, datetime, int]]:
+    """List remote backups with timestamps and sizes."""
     tz = ZoneInfo(cfg.get("timezone", "UTC"))
     out = []
     for it in rcl.lsjson(cfg):
@@ -83,6 +91,7 @@ def remote_inventory(cfg: Dict[str, Any]) -> List[Tuple[str, datetime, int]]:
     return out
 
 def plan_prune(cfg: Dict[str, Any], scope: str) -> Dict[str, Any]:
+    """Compute a retention plan without deleting anything."""
     tz = ZoneInfo(cfg.get("timezone", "UTC"))
     now = datetime.now(tz)
     pol = cfg.get("retention", {}).get(scope, {})
@@ -99,6 +108,7 @@ def plan_prune(cfg: Dict[str, Any], scope: str) -> Dict[str, Any]:
     return {"scope": scope, "keep": sorted(list(keep)), "delete": delete, "policy": pol, "pinned": sorted(list(pinned_eff))}
 
 def apply_prune(cfg: Dict[str, Any], scope: str, logger) -> Dict[str, Any]:
+    """Apply a retention plan and return the plan details."""
     plan = plan_prune(cfg, scope)
     if scope == "local":
         d = Path(cfg.get("local_dir", "/var/backups/backupd"))

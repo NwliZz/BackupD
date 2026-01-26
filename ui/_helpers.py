@@ -1,3 +1,5 @@
+"""UI helper utilities for styling, formatting, and backend access."""
+
 import json
 import math
 import re
@@ -8,6 +10,7 @@ import streamlit as st
 
 
 def inject_css() -> None:
+    """Inject shared CSS variables and helper styles into Streamlit."""
     st.markdown(
         """
 <style>
@@ -52,6 +55,7 @@ hr.bk-hr{ border:none; border-top:1px solid var(--border); margin:.75rem 0; }
 
 
 def hbytes(n: int) -> str:
+    """Human-readable byte formatter."""
     try:
         n = int(n)
     except Exception:
@@ -66,6 +70,7 @@ def hbytes(n: int) -> str:
 
 
 def badge(label: str, kind: str = "ok") -> None:
+    """Render a colored pill badge for status messaging."""
     color = {"ok": "var(--ok)", "warn": "var(--warn)", "bad": "var(--bad)"}[kind]
     cls = {"ok": "bk-ok", "warn": "bk-warn", "bad": "bk-bad"}[kind]
     st.markdown(
@@ -82,6 +87,7 @@ def badge(label: str, kind: str = "ok") -> None:
 
 
 def run_root(cmd, input_text: Optional[str] = None, timeout: int = 1800) -> Tuple[int, str, str]:
+    """Run backupctl with sudo and return (rc, stdout, stderr)."""
     p = subprocess.run(
         ["sudo", "-n", "/usr/local/sbin/backupctl"] + list(cmd),
         input=input_text,
@@ -94,6 +100,7 @@ def run_root(cmd, input_text: Optional[str] = None, timeout: int = 1800) -> Tupl
 
 
 def parse_json_best_effort(text: str) -> Optional[Dict[str, Any]]:
+    """Parse JSON from raw output that may include extra log lines."""
     s = (text or "").strip()
     if not s:
         return None
@@ -112,6 +119,7 @@ def parse_json_best_effort(text: str) -> Optional[Dict[str, Any]]:
 
 
 def show_logs(stderr: str, title: str = "Details / logs") -> None:
+    """Display stderr logs inside an expander if present."""
     if not stderr.strip():
         return
     with st.expander(title):
@@ -119,6 +127,7 @@ def show_logs(stderr: str, title: str = "Details / logs") -> None:
 
 
 def card(title: str, subtitle: str = "") -> Any:
+    """Render a styled card with a title and subtitle."""
     st.markdown(
         f"""
 <div class="bk-card">

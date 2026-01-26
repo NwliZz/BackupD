@@ -1,3 +1,5 @@
+"""CLI entrypoints for backupctl and associated management commands."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,10 +18,12 @@ from . import manager
 
 
 def cmd_inventory(_args):
+    """Print local+remote inventory used by the UI."""
     cfg = load_config()
     print(json.dumps(manager.inventory(cfg), indent=2, ensure_ascii=False))
 
 def cmd_manage_apply(_args):
+    """Apply a management plan from stdin and return a JSON summary."""
     _require_root()
     cfg = load_config()
     logger = setup_logging()
@@ -31,26 +35,32 @@ def cmd_manage_apply(_args):
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 def _require_root():
+    """Enforce root execution for backupctl commands."""
     if not is_root():
         print("backupctl must be run as root", file=sys.stderr)
         sys.exit(2)
 
 def cmd_get_config(_args):
+    """Dump the current config as JSON."""
     print(json.dumps(load_config(), indent=2, ensure_ascii=False))
 
 def cmd_set_config(_args):
+    """Validate and save config JSON read from stdin."""
     cfg = json.loads(sys.stdin.read())
     validate_config(cfg)
     save_config(cfg)
     print("OK")
 
 def cmd_status(_args):
+    """Return status/metrics used by the UI dashboard."""
     print(json.dumps(get_status(), indent=2, ensure_ascii=False))
 
 def cmd_test_cloud(_args):
+    """Run a simple rclone check against the configured remote."""
     print(rcl.test_cloud(load_config()))
 
 def cmd_discover_dbs(_args):
+    """Detect available databases and return selection metadata."""
     cfg = load_config()
     disc = dbmod.discover_databases(cfg)
     sel = dbmod.selected_databases(cfg, disc)
@@ -65,21 +75,25 @@ def cmd_discover_dbs(_args):
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 def cmd_test_dbs(_args):
+    """Attempt test queries to MySQL/Postgres and report results."""
     print(json.dumps(dbmod.test_db_access(load_config()), indent=2, ensure_ascii=False))
 
 def cmd_backup_now(_args):
+    """Force an immediate backup run."""
     setup_logging()
     res = run_backup(force=True)
     print(json.dumps(res.__dict__, indent=2, ensure_ascii=False))
     sys.exit(0 if res.ok else 1)
 
 def cmd_run_if_due(_args):
+    """Run a backup only if the schedule says it is due."""
     setup_logging()
     res = run_backup(force=False)
     print(json.dumps(res.__dict__, indent=2, ensure_ascii=False))
     sys.exit(0 if res.ok else 1)
 
 def cmd_retention_plan(_args):
+    """Compute (but do not apply) retention deletions for both scopes."""
     cfg = load_config()
     out = {
         "local": retention.plan_prune(cfg, "local"),
@@ -88,6 +102,7 @@ def cmd_retention_plan(_args):
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 def cmd_retention_apply(_args):
+    """Apply retention deletions and return the applied plan."""
     cfg = load_config()
     logger = setup_logging()
     out = {
@@ -97,6 +112,7 @@ def cmd_retention_apply(_args):
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the backupctl argparse tree and bind handlers."""
     p = argparse.ArgumentParser(prog="backupctl", description="BackupD control utility")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -118,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 def main(argv=None):
+    """CLI entrypoint for backupctl."""
     _require_root()
     args = build_parser().parse_args(argv)
     args.fn(args)

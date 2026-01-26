@@ -1,3 +1,5 @@
+"""Configuration defaults, validation, and persistence for BackupD."""
+
 from __future__ import annotations
 
 import os
@@ -14,6 +16,7 @@ SYSTEM_DB_DEFAULTS = {
 }
 
 def default_config() -> Dict[str, Any]:
+    """Return a full default config dict with sane starter values."""
     return {
         "mode": "custom",  # "custom" or "hestia"
         "include_paths": ["/etc", "/home", "/var/www"],
@@ -79,6 +82,7 @@ def default_config() -> Dict[str, Any]:
     }
 
 def load_config(path: str = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
+    """Load config from disk or create defaults if missing."""
     cfg = read_json(path, default=None)
     if cfg is None:
         cfg = default_config()
@@ -87,10 +91,12 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     return cfg
 
 def save_config(cfg: Dict[str, Any], path: str = DEFAULT_CONFIG_PATH) -> None:
+    """Persist the config atomically with restrictive permissions."""
     ensure_dir(os.path.dirname(path), mode=0o755)
     write_json_atomic(path, cfg, mode=0o600)
 
 def validate_time_str(t: str) -> None:
+    """Validate a schedule time string in HH:MM format."""
     if not isinstance(t, str) or len(t) != 5 or t[2] != ":":
         raise ValueError(f"Bad time '{t}' (expected HH:MM)")
     hh = int(t[0:2]); mm = int(t[3:5])
@@ -98,6 +104,7 @@ def validate_time_str(t: str) -> None:
         raise ValueError(f"Bad time '{t}' (expected HH:MM)")
 
 def validate_config(cfg: Dict[str, Any]) -> None:
+    """Validate critical config fields and raise on invalid values."""
     if cfg.get("mode") not in ("custom", "hestia"):
         raise ValueError("mode must be 'custom' or 'hestia'")
 

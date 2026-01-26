@@ -1,15 +1,20 @@
+"""Streamlit dashboard for BackupD status, storage, and live timers."""
+
 import streamlit as st
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from _helpers import inject_css, run_root, parse_json_best_effort, badge, hbytes, show_logs
 
+# ---- Page setup and theme helpers ----
 st.set_page_config(page_title="BackupD", layout="wide")
 inject_css()
 
+# ---- Header and connectivity notice ----
 st.title("BackupD")
 badge("LOCALHOST UI • Access via SSH tunnel", "warn")
 
+# ---- Load status from backend ----
 rc, out, err = run_root(["status"])
 data = parse_json_best_effort(out)
 
@@ -18,9 +23,12 @@ if rc != 0 or not data:
     st.code((out or "") + "\n" + (err or ""), language="text")
     st.stop()
 
+# ---- Status banner and logs ----
 badge("Status: OK", "ok")
 show_logs(err)
 
+# ---- Top-line metrics ----
+# Layout for live clock and countdown.
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.metric("Mode", data.get("mode", "?"))
@@ -67,6 +75,7 @@ def format_timedelta(td: timedelta) -> str:
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
+# Load schedule config used to seed the live clock/timer.
 rc_cfg, out_cfg, err_cfg = run_root(["get-config"])
 cfg = parse_json_best_effort(out_cfg)
 
@@ -79,9 +88,11 @@ else:
     schedule_times = cfg.get("schedule_times", [])
     delta_to_next = get_next_run(now, schedule_times)
 
+    # Match Streamlit theme typography/colors inside the embedded HTML components.
     theme_font = st.get_option("theme.font") or "Source Sans Pro"
     theme_text = st.get_option("theme.primaryColor") or st.get_option("theme.textColor") or "#e6e6e6"
 
+    # Render the live clock in its own component so JS updates reliably.
     with c1:
         clock_html = f"""
 <style>
@@ -119,6 +130,7 @@ else:
 """
         st.components.v1.html(clock_html, height=95)
 
+    # Render the countdown timer in a separate component.
     with c2:
         countdown_html = f"""
 <style>
@@ -159,6 +171,7 @@ else:
 """
         st.components.v1.html(countdown_html, height=95)
 
+# ---- Storage section ----
 disk = data.get("disk", {})
 total = int(disk.get("total_bytes", 0) or 0)
 used = int(disk.get("used_bytes", 0) or 0)
@@ -167,12 +180,14 @@ local_used = int(data.get("local_bytes", 0) or 0)
 other_used = max(used - local_used, 0)
 
 def clamp_unit(value: float) -> float:
+    """Clamp a ratio into the [0, 1] range for progress bars."""
     return min(max(value, 0.0), 1.0)
 
 pct = clamp_unit((used / total) if total else 0.0)
 other_pct = clamp_unit((other_used / total) if total else 0.0)
 backup_pct = clamp_unit((local_used / total) if total else 0.0)
 
+# ---- Storage metrics and visual bar ----
 st.markdown("---")
 st.subheader("Storage")
 theme_primary = st.get_option("theme.primaryColor") or "#1f77b4"

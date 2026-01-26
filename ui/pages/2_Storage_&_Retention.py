@@ -1,14 +1,19 @@
+"""Retention policy editor and cleanup actions."""
+
 import json
 import streamlit as st
 
 from _helpers import inject_css, run_root, parse_json_best_effort, badge, show_logs
 
+# ---- Page setup and theme helpers ----
 st.set_page_config(page_title="Storage & Retention — BackupD", layout="wide")
 inject_css()
 
+# ---- Page header ----
 st.title("Storage & Retention")
 st.markdown("🧹 **Prune locally** + ☁️ **prune remotely** based on a tiered policy (keep-all → daily → weekly → monthly).")
 
+# ---- Load config from backend ----
 rc, out, err = run_root(["get-config"])
 cfg = parse_json_best_effort(out)
 if rc != 0 or not cfg:
@@ -18,9 +23,11 @@ if rc != 0 or not cfg:
 
 show_logs(err)
 
+# ---- Policy editor ----
 st.subheader("Policy editor")
 
 def tier_editor(scope: str):
+    """Render inputs for one retention policy scope and return the values."""
     pol = cfg.get("retention", {}).get(scope, {})
     st.markdown(f"### {scope.capitalize()}")
     ka = st.number_input(f"{scope}: keep ALL for days", min_value=0, max_value=3650, value=int(pol.get("keep_all_days", 0)), key=f"{scope}_ka")
@@ -35,6 +42,7 @@ with c1:
 with c2:
     remote_pol = tier_editor("remote")
 
+# ---- Actions ----
 st.markdown("---")
 b1, b2, b3 = st.columns(3)
 refresh = b1.button("🔎 Refresh dry-run plan", use_container_width=True)
@@ -42,6 +50,7 @@ cleanup = b2.button("🧹 Run cleanup now", use_container_width=True)
 save = b3.button("💾 Save policy", use_container_width=True)
 
 if refresh:
+    # Show a dry-run plan for transparency before deletion.
     rc2, out2, err2 = run_root(["retention-plan"])
     plan = parse_json_best_effort(out2)
     if rc2 == 0 and plan:
@@ -53,6 +62,7 @@ if refresh:
     show_logs(err2)
 
 if cleanup:
+    # Apply retention and show the resulting plan for auditability.
     rc2, out2, err2 = run_root(["retention-apply"])
     plan = parse_json_best_effort(out2)
     if rc2 == 0 and plan:
@@ -64,6 +74,7 @@ if cleanup:
     show_logs(err2)
 
 if save:
+    # Persist policy changes to config.
     new = dict(cfg)
     new.setdefault("retention", {})
     new["retention"]["local"] = local_pol
@@ -78,6 +89,7 @@ if save:
 
 plan = st.session_state.get("plan")
 if plan:
+    # Summarize the most recent plan for quick review.
     st.subheader("Plan details")
     l = plan.get("local", {})
     r = plan.get("remote", {})

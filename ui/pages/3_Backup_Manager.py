@@ -1,17 +1,22 @@
+"""Interactive UI for managing backups across local and cloud storage."""
+
 import json
 import streamlit as st
 
 from _helpers import inject_css, run_root, parse_json_best_effort, badge, hbytes, show_logs
 
 
+# ---- Page setup and theme helpers ----
 st.set_page_config(page_title="Backup Manager — BackupD", layout="wide")
 inject_css()
 
+# ---- Page header ----
 st.title("Backup Manager")
 st.caption("Decide what stays Local / Cloud (OneDrive), preview changes, then apply.")
 
 
 # ---------- Session state ----------
+# Keep UI state across reruns (filters, staged actions, dialog flags).
 if "bm_actions" not in st.session_state:
     st.session_state["bm_actions"] = {}
 if "bm_pins" not in st.session_state:
@@ -46,16 +51,19 @@ if "bm_reset_pins_from_server" not in st.session_state:
     st.session_state["bm_reset_pins_from_server"] = False
 
 def _load_inventory():
+    """Fetch inventory data from the backend CLI."""
     rc, out, err = run_root(["inventory"])
     inv = parse_json_best_effort(out)
     return rc, inv, out, err
 
 
 def pretty_when(item):
+    """Pick the best timestamp field for display."""
     return item.get("stamp") or item.get("mtime") or "—"
 
 
 def origin_label(item):
+    """Normalize origin values to friendly labels."""
     o = (item.get("origin") or "unknown").lower()
     if o == "manual":
         return "Manual"
@@ -65,6 +73,7 @@ def origin_label(item):
 
 
 def options_for(name: str, local_names: set, remote_names: set):
+    """Return available action options based on current location."""
     in_l = name in local_names
     in_r = name in remote_names
     opts = [("none", "No change"), ("destroy", "🗑️ Destroy backup")]
@@ -78,14 +87,17 @@ def options_for(name: str, local_names: set, remote_names: set):
 
 
 def set_action(name: str, action: str):
+    """Persist an action choice to session state."""
     st.session_state["bm_actions"][name] = {"action": action}
 
 
 def undo_action(name: str):
+    """Clear an existing action choice."""
     st.session_state["bm_actions"].pop(name, None)
 
 
 def compute_preview(local_names: set, remote_names: set, actions: dict):
+    """Simulate the final state given current action choices."""
     final_local = set(local_names)
     final_remote = set(remote_names)
     deletes_local, deletes_remote = set(), set()
@@ -144,6 +156,7 @@ def actions_snapshot_for(all_names: list[str]) -> dict:
     return snap
 
 def loc_state(name: str, scope: str) -> str:
+    """Compute the per-scope state for display (present/add/delete/missing)."""
     if scope == "local":
         now = name in local_names
         will_del = name in pv["deletes_local"]
@@ -163,6 +176,7 @@ def loc_state(name: str, scope: str) -> str:
 
 
 def loc_dot(kind: str) -> str:
+    """Return an HTML dot indicator for location status."""
     # inline “dot” (no extra CSS needed)
     if kind == "present":
         return "<span style='display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;'></span>"
@@ -239,6 +253,7 @@ def summarize_changes(local_names: set, remote_names: set, actions: dict):
 
 
 def render_confirm_dialog(summary: dict, pinned_count: int):
+    """Render the confirmation dialog or inline fallback."""
     """Shows a lightbox-style dialog if available; otherwise shows an inline confirm card."""
     title = "Confirm apply"
 
@@ -298,6 +313,7 @@ def render_confirm_dialog(summary: dict, pinned_count: int):
 
 
 def render_result(res: dict, logs: str):
+    """Render the post-apply summary and details."""
     ok = bool(res) and not res.get("errors")
     if ok:
         badge("Applied ✅", "ok")
@@ -361,12 +377,14 @@ def render_result(res: dict, logs: str):
 
 
 # ---------- RESULT VIEW ----------
+# Show the final outcome after applying actions.
 if st.session_state["bm_view"] == "result":
     render_result(st.session_state.get("bm_last_result") or {}, st.session_state.get("bm_last_logs") or "")
     st.stop()
 
 
 # ---------- LIST VIEW ----------
+# Default view: inventory list with actions and pins.
 rc, inv, out_raw, err_raw = _load_inventory()
 if rc != 0 or not inv:
     badge("Failed to load inventory", "bad")
@@ -407,6 +425,7 @@ for item in local:
 all_names = sorted(set(local_names) | set(remote_names))
 
 def sort_key(name: str):
+    """Sort by timestamp-ish filename to show newest first."""
     item = meta.get(name, {})
     return item.get("stamp") or item.get("mtime") or ""
 

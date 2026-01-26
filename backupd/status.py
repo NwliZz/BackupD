@@ -1,3 +1,5 @@
+"""Status aggregation for the UI and CLI."""
+
 from __future__ import annotations
 
 import os
@@ -10,6 +12,7 @@ from .retention import local_inventory, remote_inventory
 from datetime import datetime, timedelta, time
 
 def _parse_hhmm(s: str) -> time | None:
+    """Parse HH:MM into a time object, returning None on failure."""
     s = (s or "").strip()
     if not s:
         return None
@@ -20,6 +23,7 @@ def _parse_hhmm(s: str) -> time | None:
         return None
 
 def _human_delta(seconds: int) -> str:
+    """Format a positive seconds delta as HH:MM:SS."""
     seconds = max(0, int(seconds))
     h = seconds // 3600
     m = (seconds % 3600) // 60
@@ -27,6 +31,7 @@ def _human_delta(seconds: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 def _next_prev_occurrence(now: datetime, hhmm_list: list[str]) -> tuple[datetime | None, datetime | None]:
+    """Compute next and previous occurrences for a list of daily times."""
     times = [t for t in (_parse_hhmm(x) for x in (hhmm_list or [])) if t is not None]
     if not times:
         return None, None
@@ -52,6 +57,7 @@ def _next_prev_occurrence(now: datetime, hhmm_list: list[str]) -> tuple[datetime
     return nxt, prv
 
 def disk_usage(path: str) -> Dict[str, Any]:
+    """Return filesystem usage stats for a path."""
     try:
         st = os.statvfs(path)
         total = st.f_frsize * st.f_blocks
@@ -62,6 +68,7 @@ def disk_usage(path: str) -> Dict[str, Any]:
         return {"path": path, "total_bytes": 0, "used_bytes": 0, "free_bytes": 0}
 
 def get_status() -> Dict[str, Any]:
+    """Build a status snapshot for the UI dashboard."""
     cfg = load_config()
     tz = ZoneInfo(cfg.get("timezone", "UTC"))
     now = datetime.now(tz).isoformat()

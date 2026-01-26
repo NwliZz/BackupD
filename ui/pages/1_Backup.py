@@ -1,14 +1,19 @@
+"""Backup configuration and manual run controls."""
+
 import json
 import streamlit as st
 
 from _helpers import inject_css, run_root, parse_json_best_effort, badge, show_logs
 
+# ---- Page setup and theme helpers ----
 st.set_page_config(page_title="Backup — BackupD", layout="wide")
 inject_css()
 
+# ---- Page header ----
 st.title("Backup")
 st.markdown("🗂️ **Build archive** ➜ 🗄️ **DB dumps** ➜ ☁️ **Upload** ➜ 🧹 **Retention**")
 
+# ---- Load config from backend ----
 rc, out, err = run_root(["get-config"])
 cfg = parse_json_best_effort(out)
 if rc != 0 or not cfg:
@@ -19,6 +24,7 @@ if rc != 0 or not cfg:
 show_logs(err)
 
 # ====== TARGETS ======
+# Configure included paths, schedules, and exclusions.
 st.subheader("Targets & Schedule")
 
 a, b = st.columns([1, 1])
@@ -43,6 +49,7 @@ with st.expander("Advanced: Excludes"):
     exclude_globs_list = [l.strip() for l in exclude_globs.splitlines() if l.strip()]
 
 # ====== DATABASES ======
+# Configure database discovery and dump schedules.
 st.markdown("---")
 st.subheader("Databases")
 
@@ -122,6 +129,7 @@ if rep:
         st.json(rep.get("raw_report", {}))
 
 # ====== CLOUD + ACTIONS ======
+# Configure remote storage and trigger immediate actions.
 st.markdown("---")
 st.subheader("Cloud & Actions")
 
@@ -177,6 +185,7 @@ with c2:
         show_logs(err2, "Logs (stderr)")
 
 if save:
+    # Build and persist a validated config payload.
     new = dict(cfg)
     new["mode"] = mode
     if mode == "custom":

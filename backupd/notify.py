@@ -1,3 +1,5 @@
+"""Notification helpers for backup failures."""
+
 from __future__ import annotations
 
 import smtplib
@@ -7,6 +9,7 @@ from typing import Any, Dict
 from .utils import run
 
 def notify_failure(cfg: Dict[str, Any], subject: str, body: str, logger) -> None:
+    """Send a failure notification via SMTP or sendmail if configured."""
     ncfg = cfg.get("notifications", {})
     if not ncfg.get("enabled"):
         return
