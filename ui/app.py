@@ -79,17 +79,28 @@ else:
     schedule_times = cfg.get("schedule_times", [])
     delta_to_next = get_next_run(now, schedule_times)
 
+    theme_font = st.get_option("theme.font") or "Source Sans Pro"
+    theme_text = st.get_option("theme.textColor") or "#e6e6e6"
+
     with c1:
         clock_html = f"""
+<style>
+  html, body {{
+    margin: 0;
+    padding: 0;
+    background: transparent;
+  }}
+  .metric {{
+    font-family: "{theme_font}", "Source Sans Pro", "Inter", "Segoe UI", system-ui, sans-serif;
+    color: {theme_text};
+  }}
+  .metric .label {{ opacity: .7; font-size: .9rem; }}
+  .metric .value {{ font-size: 1.75rem; font-weight: 600; }}
+</style>
 <div class="metric">
   <div class="label">Server Time</div>
   <div id="live-clock" class="value">{now.strftime("%H:%M:%S")}</div>
 </div>
-<style>
-  .metric {{ font-family: var(--font); }}
-  .metric .label {{ color: var(--muted); font-size: .9rem; }}
-  .metric .value {{ font-size: 1.75rem; font-weight: 600; }}
-</style>
 <script>
 (function() {{
   const clockElement = document.getElementById('live-clock');
@@ -110,15 +121,23 @@ else:
 
     with c2:
         countdown_html = f"""
+<style>
+  html, body {{
+    margin: 0;
+    padding: 0;
+    background: transparent;
+  }}
+  .metric {{
+    font-family: "{theme_font}", "Source Sans Pro", "Inter", "Segoe UI", system-ui, sans-serif;
+    color: {theme_text};
+  }}
+  .metric .label {{ opacity: .7; font-size: .9rem; }}
+  .metric .value {{ font-size: 1.75rem; font-weight: 600; }}
+</style>
 <div class="metric">
   <div class="label">Next Backup In</div>
   <div id="live-countdown" class="value">{format_timedelta(delta_to_next)}</div>
 </div>
-<style>
-  .metric {{ font-family: var(--font); }}
-  .metric .label {{ color: var(--muted); font-size: .9rem; }}
-  .metric .value {{ font-size: 1.75rem; font-weight: 600; }}
-</style>
 <script>
 (function() {{
   const countdownElement = document.getElementById('live-countdown');
