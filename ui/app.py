@@ -80,7 +80,7 @@ else:
     delta_to_next = get_next_run(now, schedule_times)
 
     theme_font = st.get_option("theme.font") or "Source Sans Pro"
-    theme_text = st.get_option("theme.textColor") or "#e6e6e6"
+    theme_text = st.get_option("theme.primaryColor") or st.get_option("theme.textColor") or "#e6e6e6"
 
     with c1:
         clock_html = f"""
