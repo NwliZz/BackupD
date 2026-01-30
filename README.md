@@ -39,7 +39,7 @@ exit
 
 ```bash
 sudo mkdir -p /opt
-sudo git clone <YOUR_GITHUB_REPO_URL> /opt/backupd
+sudo git clone https://github.com/NwliZz/BackupD /opt/backupd
 cd /opt/backupd
 sudo ./scripts/install.sh
 ```
@@ -49,7 +49,7 @@ sudo ./scripts/install.sh
 On your laptop/PC:
 
 ```bash
-ssh -L 8050:127.0.0.1:8050 manos@<VPS_IP>
+ssh -L 8050:127.0.0.1:8050 <YOUR_USERNAME>@<SERVER_IP>
 ```
 
 Open:
