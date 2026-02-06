@@ -42,13 +42,37 @@ def _parse_docker_db_id(value: str) -> Optional[Tuple[str, str, str]]:
         return None
     return engine, container, dbname
 
-def _docker_db_engine(image: str) -> Optional[str]:
-    """Best-effort engine detection from image name."""
+def _docker_db_engine(image: str, name: str, ports: str, env: Dict[str, str]) -> Optional[str]:
+    """Best-effort engine detection from image/name/ports/env."""
     img = (image or "").lower()
-    if "postgres" in img:
+    cname = (name or "").lower()
+    ptxt = (ports or "").lower()
+    env_keys = {str(k).upper() for k in (env or {}).keys()}
+
+    # Redis-family images and well-known port.
+    if (
+        any(k in img for k in ("redis", "valkey", "keydb"))
+        or "6379" in ptxt
+        or any(k in env_keys for k in ("REDIS_PASSWORD", "REDISCLI_AUTH"))
+    ):
+        return "redis"
+
+    # Postgres-family images may not contain the literal "postgres" (e.g. pgvector).
+    if (
+        any(k in img for k in ("postgres", "postgresql", "pgvector", "timescaledb", "postgis"))
+        or any(k in cname for k in ("postgres", "pgsql", "pgvector"))
+        or "5432" in ptxt
+        or any(k in env_keys for k in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"))
+    ):
         return "postgres"
-    if any(k in img for k in ("mysql", "mariadb", "percona")):
+
+    if (
+        any(k in img for k in ("mysql", "mariadb", "percona"))
+        or "3306" in ptxt
+        or any(k in env_keys for k in ("MYSQL_DATABASE", "MYSQL_ROOT_PASSWORD", "MARIADB_DATABASE", "MARIADB_ROOT_PASSWORD"))
+    ):
         return "mysql"
+
     return None
 
 def _safe_container_name(name: str) -> str:
@@ -58,15 +82,17 @@ def _safe_container_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name or "container")
 
 def _docker_ps() -> List[Dict[str, str]]:
-    """List running docker containers (id, name, image)."""
-    cp = run(["docker", "ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}"], check=False)
+    """List running docker containers (id, name, image, ports)."""
+    cp = run(["docker", "ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}"], check=False)
     if cp.returncode != 0:
         raise RuntimeError(cp.stdout.strip() or "docker ps failed")
     out = []
     for line in (cp.stdout or "").splitlines():
         parts = line.strip().split("\t")
-        if len(parts) >= 3:
-            out.append({"id": parts[0], "name": parts[1], "image": parts[2]})
+        if len(parts) >= 4:
+            out.append({"id": parts[0], "name": parts[1], "image": parts[2], "ports": parts[3]})
+        elif len(parts) >= 3:
+            out.append({"id": parts[0], "name": parts[1], "image": parts[2], "ports": ""})
     return out
 
 def _docker_env(container: str) -> Dict[str, str]:
@@ -109,9 +135,12 @@ def _mysql_credentials_from_env(env: Dict[str, str]) -> List[Tuple[str, Optional
         uniq.append((user, pw, label))
     return uniq
 
-def _docker_exec_missing(output: str) -> bool:
+def _docker_exec_missing(output: Any) -> bool:
     """Detect 'command not found' style docker exec errors."""
-    msg = (output or "").lower()
+    if isinstance(output, bytes):
+        msg = output.decode("utf-8", "ignore").lower()
+    else:
+        msg = str(output or "").lower()
     return "executable file not found" in msg or "no such file or directory" in msg
 
 def _docker_mysql_dbs(container: str) -> Tuple[List[str], Dict[str, Any]]:
@@ -145,13 +174,40 @@ def _docker_mysql_dbs(container: str) -> Tuple[List[str], Dict[str, Any]]:
             continue
     raise RuntimeError(last_err or "docker mysql discovery failed")
 
+def _postgres_users_from_env(env: Dict[str, str]) -> List[str]:
+    """Build likely Postgres usernames from environment."""
+    users: List[str] = []
+    for u in (env.get("POSTGRES_USER"), env.get("PGUSER"), "postgres"):
+        if isinstance(u, str) and u and u not in users:
+            users.append(u)
+    return users
+
+def _postgres_passwords_from_env(env: Dict[str, str]) -> List[Optional[str]]:
+    """Build likely Postgres passwords from environment."""
+    out: List[Optional[str]] = []
+    for p in (env.get("POSTGRES_PASSWORD"), env.get("PGPASSWORD"), None):
+        if p not in out:
+            out.append(p)
+    return out
+
+def _postgres_maintenance_dbs_from_env(env: Dict[str, str]) -> List[str]:
+    """Build likely maintenance DB names used for discovery queries."""
+    out: List[str] = []
+    for db in (env.get("POSTGRES_DB"), env.get("PGDATABASE"), env.get("POSTGRES_USER"), "postgres"):
+        if isinstance(db, str) and db and db not in out:
+            out.append(db)
+    return out
+
 def _docker_postgres_dbs(container: str) -> Tuple[List[str], Dict[str, Any]]:
     """Discover Postgres DBs inside a docker container."""
+    env = _docker_env(container)
     query = "SELECT datname FROM pg_database WHERE datistemplate = false;"
     last_err = None
-    for use_user in (True, False):
+
+    # Fast paths often work on official images with local socket auth.
+    for use_os_user in (True, False):
         cmd = ["docker", "exec"]
-        if use_user:
+        if use_os_user:
             cmd += ["-u", "postgres"]
         cmd += [container, "psql", "-Atc", query]
         try:
@@ -161,12 +217,132 @@ def _docker_postgres_dbs(container: str) -> Tuple[List[str], Dict[str, Any]]:
             continue
         if cp.returncode == 0:
             dbs = [l.strip() for l in cp.stdout.splitlines() if l.strip()]
-            return dbs, {"engine": "postgres", "container": container, "client": "psql", "user": "postgres" if use_user else "default"}
+            return dbs, {"engine": "postgres", "container": container, "client": "psql", "auth": "os_postgres" if use_os_user else "default"}
         if _docker_exec_missing(cp.stdout):
             last_err = "psql not found in container"
             continue
         last_err = cp.stdout.strip() or "psql query failed"
+
+    # Authenticated paths for containers that enforce password auth.
+    for user in _postgres_users_from_env(env):
+        for pw in _postgres_passwords_from_env(env):
+            for mdb in _postgres_maintenance_dbs_from_env(env):
+                cmd = ["docker", "exec"]
+                if pw:
+                    cmd += ["-e", f"PGPASSWORD={pw}"]
+                cmd += [container, "psql", "-At", "-U", user, "-d", mdb, "-c", query]
+                try:
+                    cp = run(cmd, check=False, timeout=12)
+                except subprocess.TimeoutExpired:
+                    last_err = "docker postgres discovery timed out"
+                    continue
+                if cp.returncode == 0:
+                    dbs = [l.strip() for l in cp.stdout.splitlines() if l.strip()]
+                    return dbs, {"engine": "postgres", "container": container, "client": "psql", "auth": f"user={user} db={mdb}"}
+                if _docker_exec_missing(cp.stdout):
+                    last_err = "psql not found in container"
+                    break
+                last_err = cp.stdout.strip() or "psql query failed"
     raise RuntimeError(last_err or "docker postgres discovery failed")
+
+def _redis_passwords_from_env(env: Dict[str, str]) -> List[Tuple[Optional[str], str]]:
+    """Build likely Redis passwords from environment."""
+    out: List[Tuple[Optional[str], str]] = []
+    seen = set()
+    for pw, label in (
+        (env.get("REDIS_PASSWORD"), "env"),
+        (env.get("REDISCLI_AUTH"), "env_rediscli_auth"),
+        (None, "no_password"),
+    ):
+        if pw in seen:
+            continue
+        seen.add(pw)
+        out.append((pw, label))
+    return out
+
+def _docker_redis_cli(container: str, args: List[str], password: Optional[str], timeout: int = 12) -> subprocess.CompletedProcess:
+    """Execute redis-cli inside container."""
+    cmd = ["docker", "exec", container, "redis-cli"]
+    if password:
+        cmd += ["-a", password]
+    cmd += args
+    return run(cmd, check=False, timeout=timeout)
+
+def _redis_config_value(cp: subprocess.CompletedProcess) -> Optional[str]:
+    """Parse value from 'redis-cli --raw CONFIG GET <key>' output."""
+    if cp.returncode != 0:
+        return None
+    lines = [l.strip() for l in (cp.stdout or "").splitlines() if l.strip()]
+    if not lines:
+        return None
+    if len(lines) >= 2:
+        return lines[1]
+    return lines[0]
+
+def _docker_redis_dbs(container: str) -> Tuple[List[str], Dict[str, Any]]:
+    """Discover Redis instance inside docker container."""
+    env = _docker_env(container)
+    last_err = None
+    for pw, label in _redis_passwords_from_env(env):
+        try:
+            ping = _docker_redis_cli(container, ["PING"], pw)
+        except subprocess.TimeoutExpired:
+            last_err = "docker redis discovery timed out"
+            continue
+        if ping.returncode != 0:
+            if _docker_exec_missing(ping.stdout):
+                raise RuntimeError("redis-cli not found in container")
+            last_err = ping.stdout.strip() or "redis ping failed"
+            continue
+        if "PONG" not in (ping.stdout or "").upper():
+            last_err = ping.stdout.strip() or "redis ping failed"
+            continue
+        cfg = _docker_redis_cli(container, ["--raw", "CONFIG", "GET", "databases"], pw)
+        db_count = 1
+        if cfg.returncode == 0:
+            lines = [l.strip() for l in (cfg.stdout or "").splitlines() if l.strip()]
+            for token in reversed(lines):
+                if token.isdigit():
+                    db_count = max(1, int(token))
+                    break
+        return ["instance"], {"engine": "redis", "container": container, "client": "redis-cli", "auth": label, "db_count": db_count}
+    raise RuntimeError(last_err or "docker redis discovery failed")
+
+def _docker_redis_dump(container: str) -> Tuple[bytes, Dict[str, Any]]:
+    """Dump Redis RDB file from docker container."""
+    env = _docker_env(container)
+    last_err = None
+    for pw, label in _redis_passwords_from_env(env):
+        try:
+            ping = _docker_redis_cli(container, ["PING"], pw)
+        except subprocess.TimeoutExpired:
+            last_err = "docker redis dump timed out"
+            continue
+        if ping.returncode != 0 or "PONG" not in (ping.stdout or "").upper():
+            last_err = ping.stdout.strip() or "redis ping failed"
+            continue
+
+        save = _docker_redis_cli(container, ["SAVE"], pw, timeout=30)
+        if save.returncode != 0 and "background save already in progress" not in (save.stdout or "").lower():
+            # Some deployments disable SAVE and allow BGSAVE only.
+            bgsave = _docker_redis_cli(container, ["BGSAVE"], pw, timeout=30)
+            if bgsave.returncode != 0 and "background save already in progress" not in (bgsave.stdout or "").lower():
+                last_err = (bgsave.stdout or save.stdout).strip() or "redis SAVE/BGSAVE failed"
+                continue
+
+        dir_cp = _docker_redis_cli(container, ["--raw", "CONFIG", "GET", "dir"], pw)
+        file_cp = _docker_redis_cli(container, ["--raw", "CONFIG", "GET", "dbfilename"], pw)
+        redis_dir = _redis_config_value(dir_cp) or "/data"
+        dbfilename = _redis_config_value(file_cp) or "dump.rdb"
+        redis_path = f"{redis_dir.rstrip('/')}/{dbfilename}"
+
+        cat_cmd = ["docker", "exec", container, "cat", redis_path]
+        cat_cp = run(cat_cmd, check=False, text=False, timeout=30)
+        if cat_cp.returncode == 0 and cat_cp.stdout:
+            meta = {"client": "redis-cli", "auth": label, "path": redis_path, "cmd": cat_cmd}
+            return cat_cp.stdout, meta
+        last_err = (cat_cp.stdout or b"").decode("utf-8", "ignore").strip() or f"cannot read {redis_path}"
+    raise RuntimeError(last_err or "docker redis dump failed")
 
 def _discover_docker_dbs() -> Tuple[List[str], Dict[str, Any]]:
     """Discover DBs in running docker containers."""
@@ -175,15 +351,22 @@ def _discover_docker_dbs() -> Tuple[List[str], Dict[str, Any]]:
     containers = _docker_ps()
     raw["containers_checked"] = len(containers)
     for c in containers:
-        engine = _docker_db_engine(c.get("image", ""))
+        env = _docker_env(c["name"])
+        engine = _docker_db_engine(c.get("image", ""), c.get("name", ""), c.get("ports", ""), env)
+        entry = {"name": c.get("name"), "image": c.get("image"), "ports": c.get("ports", ""), "engine": engine}
         if not engine:
+            entry["skipped"] = True
+            raw["containers"].append(entry)
             continue
-        entry = {"name": c.get("name"), "image": c.get("image"), "engine": engine}
         try:
             if engine == "mysql":
                 dbs, meta = _docker_mysql_dbs(c["name"])
-            else:
+            elif engine == "postgres":
                 dbs, meta = _docker_postgres_dbs(c["name"])
+            elif engine == "redis":
+                dbs, meta = _docker_redis_dbs(c["name"])
+            else:
+                dbs, meta = [], {}
             entry.update(meta)
             entry["dbs"] = dbs
             for dbname in dbs:
@@ -196,9 +379,19 @@ def _discover_docker_dbs() -> Tuple[List[str], Dict[str, Any]]:
 def _sanitize_cmd(cmd: List[str]) -> List[str]:
     """Mask passwords in command args for logging."""
     out = []
+    hide_next = False
     for c in cmd:
-        if isinstance(c, str) and c.startswith("--password="):
+        if hide_next:
+            out.append("***")
+            hide_next = False
+            continue
+        if c in ("-a", "--password"):
+            out.append(c)
+            hide_next = True
+        elif isinstance(c, str) and c.startswith("--password="):
             out.append("--password=***")
+        elif isinstance(c, str) and c.startswith("PGPASSWORD="):
+            out.append("PGPASSWORD=***")
         else:
             out.append(c)
     return out
@@ -231,23 +424,45 @@ def _docker_mysql_dump(container: str, dbname: str, dump_options: List[str]) -> 
 
 def _docker_postgres_dump(container: str, dbname: str, fmt: str) -> Tuple[bytes, Dict[str, Any]]:
     """Run a Postgres dump inside docker and return bytes + metadata."""
+    env = _docker_env(container)
     last_err = None
-    for use_user in (True, False):
+
+    # Fast paths that work with local peer/trust auth.
+    for use_os_user in (True, False):
         cmd = ["docker", "exec"]
-        if use_user:
+        if use_os_user:
             cmd += ["-u", "postgres"]
+        cmd += [container, "pg_dump"]
         if fmt == "custom":
-            cmd += [container, "pg_dump", "-Fc", "-d", dbname]
-        else:
-            cmd += [container, "pg_dump", "-d", dbname]
-        cp = run(cmd, check=False, text=False)
+            cmd += ["-Fc"]
+        cmd += ["-d", dbname]
+        cp = run(cmd, check=False, text=False, timeout=60)
         if cp.returncode == 0:
-            meta = {"client": "pg_dump", "user": "postgres" if use_user else "default", "cmd": cmd}
+            meta = {"client": "pg_dump", "auth": "os_postgres" if use_os_user else "default", "cmd": _sanitize_cmd(cmd)}
             return cp.stdout, meta
         if _docker_exec_missing(cp.stdout.decode("utf-8", "ignore")):
             last_err = "pg_dump not found in container"
             continue
         last_err = (cp.stdout or b"").decode("utf-8", "ignore").strip() or "pg_dump failed"
+
+    # Explicit user/password auth.
+    for user in _postgres_users_from_env(env):
+        for pw in _postgres_passwords_from_env(env):
+            cmd = ["docker", "exec"]
+            if pw:
+                cmd += ["-e", f"PGPASSWORD={pw}"]
+            cmd += [container, "pg_dump"]
+            if fmt == "custom":
+                cmd += ["-Fc"]
+            cmd += ["-U", user, "-d", dbname]
+            cp = run(cmd, check=False, text=False, timeout=60)
+            if cp.returncode == 0:
+                meta = {"client": "pg_dump", "auth": f"user={user}", "cmd": _sanitize_cmd(cmd)}
+                return cp.stdout, meta
+            if _docker_exec_missing(cp.stdout.decode("utf-8", "ignore")):
+                last_err = "pg_dump not found in container"
+                break
+            last_err = (cp.stdout or b"").decode("utf-8", "ignore").strip() or "pg_dump failed"
     raise RuntimeError(last_err or "docker postgres dump failed")
 
 def _ensure_postgres_group_dir(p: Path, mode: int) -> None:
@@ -261,7 +476,7 @@ def _ensure_postgres_group_dir(p: Path, mode: int) -> None:
         pass
 
 def discover_databases(cfg: Dict[str, Any]) -> DBDiscovery:
-    """Detect MySQL/Postgres databases available for backup."""
+    """Detect local and docker databases available for backup."""
     raw = {}
     mysql_dbs, pg_dbs, docker_dbs = [], [], []
     mysql_err, pg_err, docker_err = None, None, None
@@ -457,6 +672,15 @@ def dump_databases(cfg: Dict[str, Any], selected: Dict[str, List[str]], logger) 
                     out.write_text(dump_bytes.decode("utf-8", "ignore"), encoding="utf-8")
                     if pcfg.get("compress", False):
                         run(["gzip", "-f", str(out)], check=True)
+            elif engine == "redis":
+                out = dump_root / f"docker_redis_{safe_container}_{stamp}.rdb"
+                dump_bytes, meta = _docker_redis_dump(container)
+                logger.info(
+                    "Dumping Docker Redis instance (container %s) with: %s",
+                    container,
+                    shell_quote(_sanitize_cmd(meta.get("cmd", []))),
+                )
+                out.write_bytes(dump_bytes)
             else:
                 logger.warning("Skipping docker DB target with unknown engine: %s", item)
 
