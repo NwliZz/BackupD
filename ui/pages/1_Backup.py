@@ -6,12 +6,12 @@ import streamlit as st
 from _helpers import inject_css, run_root, parse_json_best_effort, badge, show_logs
 
 # ---- Page setup and theme helpers ----
-st.set_page_config(page_title="Backup — BackupD", layout="wide")
+st.set_page_config(page_title="Backup - BackupD", layout="wide")
 inject_css()
 
 # ---- Page header ----
 st.title("Backup")
-st.markdown("🗂️ **Build archive** ➜ 🗄️ **DB dumps** ➜ ☁️ **Upload** ➜ 🧹 **Retention**")
+st.markdown("Build archive -> DB dumps -> Upload -> Retention")
 
 # ---- Load config from backend ----
 rc, out, err = run_root(["get-config"])
@@ -58,19 +58,22 @@ db_enabled = st.toggle("Enable DB discovery/dumps", value=bool(db_cfg.get("enabl
 
 colA, colB, colC = st.columns([1, 1, 1])
 with colA:
-    policy = st.selectbox("DB dump policy", ["hybrid", "daily", "every_backup"],
-                          index=["hybrid", "daily", "every_backup"].index(db_cfg.get("policy", "hybrid")))
+    policy = st.selectbox(
+        "DB dump policy",
+        ["hybrid", "daily", "every_backup"],
+        index=["hybrid", "daily", "every_backup"].index(db_cfg.get("policy", "hybrid")),
+    )
 with colB:
     dump_times = st.text_input("DB dump times (HH:MM, comma-separated)", value=",".join(db_cfg.get("dump_times", ["03:05"])))
     dump_times_list = [t.strip() for t in dump_times.split(",") if t.strip()]
 with colC:
-    st.caption("Tip: for WP + Pretalx critical restores, use **every_backup**.")
+    st.caption("Tip: for WP + Pretalx critical restores, use every_backup.")
 
 btn1, btn2, btn3 = st.columns(3)
 with btn1:
-    discover = st.button("🔎 Discover live DBs", use_container_width=True)
+    discover = st.button("Discover live DBs", use_container_width=True)
 with btn2:
-    testdb = st.button("🧪 Test DB access", use_container_width=True)
+    testdb = st.button("Test DB access", use_container_width=True)
 with btn3:
     st.write("")
 
@@ -93,38 +96,57 @@ if testdb:
             ok = bool(res.get(key, {}).get("ok"))
             with col:
                 badge(f"{label}: {'OK' if ok else 'FAILED'}", "ok" if ok else "bad")
-                st.code(res.get(key, {}).get("detail", "").strip() or "—", language="text")
+                st.code(res.get(key, {}).get("detail", "").strip() or "-", language="text")
         show_logs(err2)
     else:
         badge("DB test: FAILED", "bad")
         st.code(out2 + "\n" + err2, language="text")
 
 rep = st.session_state.get("db_report")
-
-mysql_selected, pg_selected = [], []
 sys_mysql = ",".join(cfg.get("system_db_defaults", {}).get("mysql", ["information_schema", "performance_schema", "sys"]))
 sys_pg = ",".join(cfg.get("system_db_defaults", {}).get("postgres", ["template0", "template1"]))
 
-if rep:
-    mysql_all = rep.get("mysql_dbs", [])
-    pg_all = rep.get("postgres_dbs", [])
-    sel = rep.get("selected", {"mysql": [], "postgres": []})
+mysql_cfg_selected = db_cfg.get("mysql", {}).get("include_dbs", [])
+pg_cfg_selected = db_cfg.get("postgres", {}).get("include_dbs", [])
+docker_cfg_selected = db_cfg.get("docker", {}).get("include_dbs", [])
 
-    st.markdown("#### DB Discovery Report")
-    left, right = st.columns(2)
+mysql_all = rep.get("mysql_dbs", []) if rep else []
+pg_all = rep.get("postgres_dbs", []) if rep else []
+docker_all = rep.get("docker_dbs", []) if rep else []
+sel = rep.get("selected", {}) if rep else {}
 
-    with left:
-        badge(f"MySQL found: {len(mysql_all)} • selected: {len(sel.get('mysql', []))}", "ok")
-        mysql_selected = st.multiselect("Select MySQL DBs to dump", options=mysql_all, default=sel.get("mysql", []))
-        with st.expander("Advanced: MySQL system DB defaults"):
-            sys_mysql = st.text_input("System DBs (comma-separated)", value=sys_mysql)
+mysql_selected_defaults = sel.get("mysql", mysql_cfg_selected)
+pg_selected_defaults = sel.get("postgres", pg_cfg_selected)
+docker_selected_defaults = sel.get("docker", docker_cfg_selected)
 
-    with right:
-        badge(f"Postgres found: {len(pg_all)} • selected: {len(sel.get('postgres', []))}", "ok")
-        pg_selected = st.multiselect("Select Postgres DBs to dump", options=pg_all, default=sel.get("postgres", []))
-        with st.expander("Advanced: Postgres system DB defaults"):
-            sys_pg = st.text_input("System DBs (comma-separated)", value=sys_pg)
+# Keep selected values visible even when discovery returns no options.
+mysql_options = sorted(set(mysql_all) | set(mysql_selected_defaults))
+pg_options = sorted(set(pg_all) | set(pg_selected_defaults))
+docker_options = sorted(set(docker_all) | set(docker_selected_defaults))
 
+st.markdown("#### DB Discovery Report")
+left, middle, right = st.columns(3)
+
+with left:
+    badge(f"MySQL found: {len(mysql_all)} | selected: {len(mysql_selected_defaults)}", "ok")
+    mysql_selected = st.multiselect("Select MySQL DBs to dump", options=mysql_options, default=mysql_selected_defaults)
+    with st.expander("Advanced: MySQL system DB defaults"):
+        sys_mysql = st.text_input("System DBs (comma-separated)", value=sys_mysql)
+
+with middle:
+    badge(f"Postgres found: {len(pg_all)} | selected: {len(pg_selected_defaults)}", "ok")
+    pg_selected = st.multiselect("Select Postgres DBs to dump", options=pg_options, default=pg_selected_defaults)
+    with st.expander("Advanced: Postgres system DB defaults"):
+        sys_pg = st.text_input("System DBs (comma-separated)", value=sys_pg)
+
+with right:
+    badge(f"Docker DBs found: {len(docker_all)} | selected: {len(docker_selected_defaults)}", "ok")
+    docker_selected = st.multiselect("Select Docker DBs to dump", options=docker_options, default=docker_selected_defaults)
+    st.caption("Format: engine@container/db")
+
+if not rep:
+    st.caption("Run Discover live DBs to populate current live DB lists.")
+else:
     with st.expander("Advanced: raw discovery details"):
         st.json(rep.get("raw_report", {}))
 
@@ -135,15 +157,15 @@ st.subheader("Cloud & Actions")
 
 c1, c2 = st.columns([1, 1])
 with c1:
-    upload_enabled = st.toggle("☁️ Upload enabled", value=bool(cfg.get("upload_enabled", True)))
+    upload_enabled = st.toggle("Upload enabled", value=bool(cfg.get("upload_enabled", True)))
     rclone_remote = st.text_input("rclone remote name", value=cfg.get("rclone_remote", "onedrive"))
     remote_path = st.text_input("Remote base path", value=cfg.get("remote_path", "VPS-Backups"))
 
 with c2:
     b1, b2, b3 = st.columns(3)
-    testcloud = b1.button("🔌 Test OneDrive", use_container_width=True)
-    backupnow = b2.button("🚀 Backup now", use_container_width=True)
-    save = b3.button("💾 Save", use_container_width=True)
+    testcloud = b1.button("Test OneDrive", use_container_width=True)
+    backupnow = b2.button("Backup now", use_container_width=True)
+    save = b3.button("Save", use_container_width=True)
 
     if testcloud:
         rc2, out2, err2 = run_root(["test-cloud"])
@@ -155,13 +177,13 @@ with c2:
             st.code(out2 + "\n" + err2, language="text")
 
     if backupnow:
-        with st.spinner("Running backup…"):
+        with st.spinner("Running backup..."):
             rc2, out2, err2 = run_root(["backup-now"])
         res = parse_json_best_effort(out2)
         if rc2 == 0 and res and res.get("ok"):
-            badge("Backup: SUCCESS ✅", "ok")
+            badge("Backup: SUCCESS", "ok")
         else:
-            badge("Backup: FAILED ❌", "bad")
+            badge("Backup: FAILED", "bad")
 
         # Pretty summary
         if res:
@@ -174,8 +196,8 @@ with c2:
             st.markdown("**Artifacts**")
             st.code(
                 "\n".join([
-                    f"archive: {res.get('archive_path') or '—'}",
-                    f"db_dump_dir: {res.get('db_dump_dir') or '—'}",
+                    f"archive: {res.get('archive_path') or '-'}",
+                    f"db_dump_dir: {res.get('db_dump_dir') or '-'}",
                 ]),
                 language="text",
             )
@@ -210,24 +232,25 @@ if save:
     new_db["policy"] = policy
     new_db["dump_times"] = dump_times_list
 
-    if rep:
-        new.setdefault("system_db_defaults", {})
-        new["system_db_defaults"] = {
-            "mysql": [x.strip() for x in sys_mysql.split(",") if x.strip()],
-            "postgres": [x.strip() for x in sys_pg.split(",") if x.strip()],
-        }
-        new_db.setdefault("mysql", {})
-        new_db.setdefault("postgres", {})
-        new_db["mysql"]["include_dbs"] = mysql_selected
-        new_db["postgres"]["include_dbs"] = pg_selected
-        new_db["mysql"]["exclude_system_dbs"] = new["system_db_defaults"]["mysql"]
-        new_db["postgres"]["exclude_system_dbs"] = new["system_db_defaults"]["postgres"]
+    new.setdefault("system_db_defaults", {})
+    new["system_db_defaults"] = {
+        "mysql": [x.strip() for x in sys_mysql.split(",") if x.strip()],
+        "postgres": [x.strip() for x in sys_pg.split(",") if x.strip()],
+    }
+    new_db.setdefault("mysql", {})
+    new_db.setdefault("postgres", {})
+    new_db.setdefault("docker", {})
+    new_db["mysql"]["include_dbs"] = mysql_selected
+    new_db["postgres"]["include_dbs"] = pg_selected
+    new_db["docker"]["include_dbs"] = docker_selected
+    new_db["mysql"]["exclude_system_dbs"] = new["system_db_defaults"]["mysql"]
+    new_db["postgres"]["exclude_system_dbs"] = new["system_db_defaults"]["postgres"]
 
     new["db"] = new_db
 
     rc2, out2, err2 = run_root(["set-config"], input_text=json.dumps(new))
     if rc2 == 0:
-        badge("Saved ✅", "ok")
+        badge("Saved", "ok")
     else:
-        badge("Save FAILED ❌", "bad")
+        badge("Save FAILED", "bad")
         st.code(out2 + "\n" + err2, language="text")

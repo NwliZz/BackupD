@@ -67,8 +67,9 @@ def cmd_discover_dbs(_args):
     out = {
         "mysql_dbs": disc.mysql_dbs,
         "postgres_dbs": disc.postgres_dbs,
+        "docker_dbs": disc.docker_dbs,
         "selected": sel,
-        "errors": {"mysql": disc.mysql_error, "postgres": disc.postgres_error},
+        "errors": {"mysql": disc.mysql_error, "postgres": disc.postgres_error, "docker": disc.docker_error},
         "raw_report": disc.raw,
         "system_db_defaults": cfg.get("system_db_defaults", {}),
     }

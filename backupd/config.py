@@ -55,6 +55,11 @@ def default_config() -> Dict[str, Any]:
                 "format": "custom",  # "custom" or "plain"
                 "compress": False,
             },
+            "docker": {
+                "enabled": True,
+                "include_dbs": [],
+                "exclude_dbs": [],
+            },
         },
 
         "retention": {
